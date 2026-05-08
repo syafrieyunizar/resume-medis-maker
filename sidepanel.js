@@ -29,18 +29,83 @@ function toast(msg, type = "") {
 }
 
 // ---------------- Settings ----------------
+const PROVIDERS = {
+  gemini: { label: "Gemini", url: null /* dynamic */ },
+  sumopod: { label: "Sumopod", url: "https://ai.sumopod.com/v1/chat/completions" },
+  aimurah: { label: "AImurah", url: "https://aimurah.my.id/api/v1/chat/completions" },
+};
+
+function syncModelFields(provider, modelValue) {
+  const isGemini = provider === "gemini";
+  const geminiField = $("#modelGeminiField");
+  const customField = $("#modelCustomField");
+  const geminiSelect = $("#modelGemini");
+  const customInput = $("#modelCustom");
+  const apiKeyLabel = document.querySelector('label[for] .label, .field .label');
+  // update API key label text
+  const apiKeyField = $("#apiKey").closest(".field");
+  if (apiKeyField) {
+    apiKeyField.querySelector(".label").textContent =
+      (isGemini ? "Gemini" : PROVIDERS[provider]?.label || "Provider") + " API Key";
+  }
+
+  if (isGemini) {
+    geminiField.hidden = false;
+    const known = ["gemini-2.0-flash", "gemini-2.5-flash", "gemini-2.5-pro"];
+    if (modelValue && known.includes(modelValue)) {
+      geminiSelect.value = modelValue;
+      customField.hidden = true;
+    } else if (modelValue) {
+      geminiSelect.value = "__other__";
+      customInput.value = modelValue;
+      customField.hidden = false;
+    } else {
+      geminiSelect.value = "gemini-2.0-flash";
+      customField.hidden = true;
+    }
+  } else {
+    geminiField.hidden = true;
+    customField.hidden = false;
+    if (modelValue) customInput.value = modelValue;
+  }
+}
+
 async function loadSettings() {
-  const { apiKey = "", model = "gemini-2.0-flash" } =
-    await chrome.storage.local.get(["apiKey", "model"]);
+  const { apiKey = "", model = "gemini-2.0-flash", provider = "gemini" } =
+    await chrome.storage.local.get(["apiKey", "model", "provider"]);
   $("#apiKey").value = apiKey;
-  $("#model").value = model;
+  $("#provider").value = provider;
+  syncModelFields(provider, model);
 }
 loadSettings();
 
+$("#provider").addEventListener("change", () => {
+  syncModelFields($("#provider").value, "");
+});
+$("#modelGemini").addEventListener("change", () => {
+  $("#modelCustomField").hidden = $("#modelGemini").value !== "__other__";
+});
+
+function getCurrentModel() {
+  const provider = $("#provider").value;
+  if (provider === "gemini") {
+    const v = $("#modelGemini").value;
+    return v === "__other__" ? $("#modelCustom").value.trim() : v;
+  }
+  return $("#modelCustom").value.trim();
+}
+
 $("#saveSettings").addEventListener("click", async () => {
+  const provider = $("#provider").value;
+  const model = getCurrentModel();
+  if (!model) {
+    toast("Model wajib diisi", "error");
+    return;
+  }
   await chrome.storage.local.set({
     apiKey: $("#apiKey").value.trim(),
-    model: $("#model").value,
+    model,
+    provider,
   });
   toast("Pengaturan disimpan", "success");
 });
@@ -112,12 +177,17 @@ aksesBtn.addEventListener("click", async () => {
 
 // ---------------- CPPT: Extract via Gemini ----------------
 extractBtn.addEventListener("click", async () => {
-  const { apiKey, model = "gemini-2.0-flash" } = await chrome.storage.local.get([
-    "apiKey",
-    "model",
-  ]);
+  const {
+    apiKey,
+    model = "gemini-2.0-flash",
+    provider = "gemini",
+  } = await chrome.storage.local.get(["apiKey", "model", "provider"]);
   if (!apiKey) {
     toast("Isi API Key di tab Setting dulu", "error");
+    return;
+  }
+  if (!model) {
+    toast("Model belum diatur", "error");
     return;
   }
   if (!state.cpptText) {
@@ -128,7 +198,7 @@ extractBtn.addEventListener("click", async () => {
   const status = $("#cpptStatus");
   status.hidden = false;
   status.className = "status is-loading";
-  status.textContent = "Memproses dengan Gemini...";
+  status.textContent = `Memproses dengan ${PROVIDERS[provider]?.label || provider}...`;
   extractBtn.disabled = true;
 
   const systemPrompt =
@@ -176,45 +246,68 @@ Berikan output untuk: Pemeriksaan Penunjang Bermakna, Terapi Selama Dirawat, Ope
   };
 
   try {
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(
-      model
-    )}:generateContent?key=${encodeURIComponent(apiKey)}`;
+    const userMsg =
+      "Data CPPT:\n\n" +
+      state.cpptText +
+      "\n\nKembalikan hasil sebagai JSON sesuai skema. Setiap field berisi rangkuman naratif lengkap dan detail. Jika tidak ada data, isi dengan '-'.";
 
-    const body = {
-      systemInstruction: { parts: [{ text: systemPrompt }] },
-      contents: [
-        {
-          role: "user",
-          parts: [
-            {
-              text:
-                "Data CPPT:\n\n" +
-                state.cpptText +
-                "\n\nKembalikan hasil sebagai JSON sesuai skema. Setiap field berisi rangkuman naratif lengkap dan detail. Jika tidak ada data, isi dengan '-'.",
-            },
-          ],
+    let text;
+    if (provider === "gemini") {
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(
+        model
+      )}:generateContent?key=${encodeURIComponent(apiKey)}`;
+      const body = {
+        systemInstruction: { parts: [{ text: systemPrompt }] },
+        contents: [{ role: "user", parts: [{ text: userMsg }] }],
+        generationConfig: {
+          responseMimeType: "application/json",
+          responseSchema: schema,
+          temperature: 0.2,
         },
-      ],
-      generationConfig: {
-        responseMimeType: "application/json",
-        responseSchema: schema,
+      };
+      const res = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      if (!res.ok) {
+        const errText = await res.text();
+        throw new Error("API " + res.status + ": " + errText.slice(0, 200));
+      }
+      const data = await res.json();
+      text = data?.candidates?.[0]?.content?.parts?.[0]?.text;
+    } else {
+      // OpenAI-compatible: Sumopod, AImurah
+      const endpoint = PROVIDERS[provider]?.url;
+      if (!endpoint) throw new Error("Provider tidak dikenal: " + provider);
+      const body = {
+        model,
+        messages: [
+          { role: "system", content: systemPrompt },
+          { role: "user", content: userMsg },
+        ],
         temperature: 0.2,
-      },
-    };
-
-    const res = await fetch(url, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    });
-    if (!res.ok) {
-      const errText = await res.text();
-      throw new Error("API " + res.status + ": " + errText.slice(0, 200));
+        response_format: { type: "json_object" },
+      };
+      const res = await fetch(endpoint, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${apiKey}`,
+        },
+        body: JSON.stringify(body),
+      });
+      if (!res.ok) {
+        const errText = await res.text();
+        throw new Error("API " + res.status + ": " + errText.slice(0, 200));
+      }
+      const data = await res.json();
+      text = data?.choices?.[0]?.message?.content;
     }
-    const data = await res.json();
-    const text = data?.candidates?.[0]?.content?.parts?.[0]?.text;
-    if (!text) throw new Error("Respons kosong dari Gemini");
-    const parsed = JSON.parse(text);
+    if (!text) throw new Error("Respons kosong dari provider");
+    // Some providers wrap JSON in code fences
+    const cleaned = text.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "");
+    const parsed = JSON.parse(cleaned);
 
     $("#cpptResults").hidden = false;
     $$("#cpptResults textarea").forEach((ta) => {
