@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="id">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Resume Medis Reviewer</title>
+    <link rel="stylesheet" href="sidepanel.css" />
+  </head>
+  <body>
+    <header class="app-header">
+      <h1 class="app-title">Resume Medis Reviewer</h1>
+      <nav class="tabs" role="tablist">
+        <button class="tab" data-tab="setting" role="tab">Setting</button>
+        <button class="tab is-active" data-tab="so" role="tab">SO</button>
+        <button class="tab" data-tab="cppt" role="tab">CPPT</button>
+      </nav>
+    </header>
+
+    <main class="content">
+      <!-- SETTING -->
+      <section class="panel" data-panel="setting" hidden>
+        <label class="field">
+          <span class="label">Gemini API Key</span>
+          <input id="apiKey" type="password" class="input" placeholder="AIza..." autocomplete="off" />
+          <span class="hint">Disimpan lokal di browser Anda.</span>
+        </label>
+        <label class="field">
+          <span class="label">Model</span>
+          <select id="model" class="input">
+            <option value="gemini-2.0-flash">gemini-2.0-flash</option>
+            <option value="gemini-2.5-flash">gemini-2.5-flash</option>
+            <option value="gemini-2.5-pro">gemini-2.5-pro</option>
+          </select>
+        </label>
+        <button id="saveSettings" class="btn btn-primary">Simpan</button>
+      </section>
+
+      <!-- SO -->
+      <section class="panel is-active" data-panel="so">
+        <label class="field">
+          <span class="label">Subjektif</span>
+          <textarea id="soSubjektif" class="textarea" rows="8" placeholder="Tulis subjektif..."></textarea>
+        </label>
+        <label class="field">
+          <span class="label">Objektif</span>
+          <textarea id="soObjektif" class="textarea" rows="8" placeholder="Tulis objektif..."></textarea>
+        </label>
+        <button id="insertSO" class="btn btn-primary">Masukkan detail</button>
+      </section>
+
+      <!-- CPPT -->
+      <section class="panel" data-panel="cppt" hidden>
+        <p class="note">Pastikan sudah berada di halaman CPPT, dan show entries 100.</p>
+        <button id="aksesCPPT" class="btn btn-primary">Akses CPPT</button>
+        <button id="extractCPPT" class="btn btn-outline" disabled>Extract data CPPT</button>
+
+        <div id="cpptStatus" class="status" hidden></div>
+
+        <div class="results" id="cpptResults" hidden>
+          <div class="result-field">
+            <span class="label">Pemeriksaan Penunjang Bermakna</span>
+            <textarea class="textarea" rows="4" data-key="penunjang"></textarea>
+          </div>
+          <div class="result-field">
+            <span class="label">Terapi Selama Dirawat</span>
+            <textarea class="textarea" rows="4" data-key="terapi_dirawat"></textarea>
+          </div>
+          <div class="result-field">
+            <span class="label">Operasi/Tindakan</span>
+            <textarea class="textarea" rows="3" data-key="operasi"></textarea>
+          </div>
+          <div class="result-field">
+            <span class="label">Diagnosa Utama</span>
+            <textarea class="textarea" rows="2" data-key="dx_utama"></textarea>
+          </div>
+          <div class="result-field">
+            <span class="label">Diagnosa Sekunder</span>
+            <textarea class="textarea" rows="3" data-key="dx_sekunder"></textarea>
+          </div>
+          <div class="result-field">
+            <span class="label">Konsultasi Bidang Lain</span>
+            <textarea class="textarea" rows="3" data-key="konsul"></textarea>
+          </div>
+          <div class="result-field">
+            <span class="label">Terapi Saat Pulang</span>
+            <textarea class="textarea" rows="3" data-key="terapi_pulang"></textarea>
+          </div>
+          <button id="insertCPPT" class="btn btn-primary">Masukkan Detail</button>
+        </div>
+      </section>
+    </main>
+
+    <div id="toast" class="toast" hidden></div>
+
+    <script src="sidepanel.js"></script>
+  </body>
+</html>
