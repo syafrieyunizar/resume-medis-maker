@@ -20,17 +20,31 @@
       <!-- SETTING -->
       <section class="panel" data-panel="setting" hidden>
         <label class="field">
+          <span class="label">Provider</span>
+          <select id="provider" class="input">
+            <option value="gemini">Gemini (Google)</option>
+            <option value="sumopod">Sumopod</option>
+            <option value="aimurah">AImurah</option>
+          </select>
+        </label>
+        <label class="field">
           <span class="label">Gemini API Key</span>
           <input id="apiKey" type="password" class="input" placeholder="AIza..." autocomplete="off" />
           <span class="hint">Disimpan lokal di browser Anda.</span>
         </label>
-        <label class="field">
+        <label class="field" id="modelGeminiField">
           <span class="label">Model</span>
-          <select id="model" class="input">
+          <select id="modelGemini" class="input">
             <option value="gemini-2.0-flash">gemini-2.0-flash</option>
             <option value="gemini-2.5-flash">gemini-2.5-flash</option>
             <option value="gemini-2.5-pro">gemini-2.5-pro</option>
+            <option value="__other__">Other (isi manual)</option>
           </select>
+        </label>
+        <label class="field" id="modelCustomField" hidden>
+          <span class="label">Model</span>
+          <input id="modelCustom" type="text" class="input" placeholder="contoh: gpt-4o-mini, claude-3-5-sonnet, dll" autocomplete="off" />
+          <span class="hint">Isi sesuai daftar model yang didukung provider.</span>
         </label>
         <button id="saveSettings" class="btn btn-primary">Simpan</button>
       </section>
