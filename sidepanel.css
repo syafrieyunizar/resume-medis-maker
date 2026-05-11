@@ -80,6 +80,11 @@ html, body {
   gap: 4px;
 }
 
+body.is-admin-mode .tabs,
+body.is-admin-mode .settings-button {
+  display: none;
+}
+
 .tab {
   flex: 1;
   appearance: none;
@@ -107,6 +112,12 @@ html, body {
 .panel[hidden] { display: none; }
 
 .field { display: flex; flex-direction: column; gap: 6px; }
+.settings-main {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.settings-main[hidden] { display: none; }
 .settings-group {
   display: flex;
   flex-direction: column;
@@ -115,6 +126,56 @@ html, body {
   padding-top: 12px;
 }
 .settings-group[hidden] { display: none; }
+.admin-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.admin-panel[hidden] { display: none; }
+.admin-header {
+  align-items: flex-start;
+  border-bottom: 1px solid var(--cloud-gray);
+  display: flex;
+  gap: 10px;
+  justify-content: space-between;
+  padding-bottom: 12px;
+}
+.section-title {
+  color: var(--ink-solid);
+  font-family: var(--font-heading);
+  font-size: 18px;
+  font-weight: 700;
+  letter-spacing: -0.04em;
+  line-height: 1.2;
+  margin: 2px 0 0;
+}
+.admin-tabs {
+  display: flex;
+  gap: 4px;
+}
+.admin-tab {
+  flex: 1;
+  appearance: none;
+  background: transparent;
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: var(--subtle-gray);
+  cursor: pointer;
+  font-family: var(--font-body);
+  font-size: 13px;
+  font-weight: 600;
+  padding: 10px 8px;
+}
+.admin-tab.is-active {
+  border-bottom-color: var(--ink-solid);
+  color: var(--ink-solid);
+}
+.admin-section {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.admin-section[hidden] { display: none; }
 .label {
   font-size: 12px;
   font-weight: 600;
@@ -203,6 +264,105 @@ html, body {
 }
 .status.is-error { color: #b91c1c; background: #fee2e2; }
 .status.is-loading { color: var(--deep-violet); background: rgba(123, 104, 238, 0.08); }
+.status.is-success { color: var(--success); background: var(--whisper-white); }
+
+.progress-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.progress-panel[hidden] { display: none; }
+.progress-track {
+  background: var(--whisper-white);
+  border: 1px solid var(--cloud-gray);
+  border-radius: 999px;
+  height: 10px;
+  overflow: hidden;
+}
+.progress-fill {
+  background: var(--ink-solid);
+  height: 100%;
+  transition: width 0.45s ease, background 0.45s ease;
+  width: 0%;
+}
+.progress-fill.is-success { background: var(--success); }
+.progress-text {
+  color: var(--subtle-gray);
+  font-size: 12px;
+}
+
+.claim-result {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.claim-result[hidden] { display: none; }
+.claim-card {
+  border: 1px solid var(--cloud-gray);
+  border-radius: 9px;
+  padding: 10px;
+}
+.claim-risk {
+  border-color: var(--cloud-gray);
+}
+.claim-risk.is-high {
+  background: #fee2e2;
+  border-color: #b91c1c;
+}
+.claim-risk.is-medium {
+  background: #ffedd5;
+  border-color: #c2410c;
+}
+.claim-risk.is-low {
+  background: #dcfce7;
+  border-color: var(--success);
+}
+.claim-card-title {
+  color: var(--ink-solid);
+  font-size: 13px;
+  font-weight: 700;
+  margin-bottom: 6px;
+}
+.claim-summary {
+  color: var(--ink-solid);
+  font-size: 13px;
+  margin: 0;
+}
+.claim-badge {
+  border: 1px solid var(--cloud-gray);
+  border-radius: 999px;
+  color: var(--subtle-gray);
+  display: inline-block;
+  font-size: 11px;
+  font-weight: 700;
+  margin-bottom: 6px;
+  padding: 2px 7px;
+}
+.claim-badge.is-critical { color: #b91c1c; border-color: #b91c1c; }
+.claim-badge.is-warning { color: #c2410c; border-color: #c2410c; }
+.claim-badge.is-info { color: var(--subtle-gray); }
+.claim-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.claim-section-title {
+  color: var(--slate-gray);
+  font-size: 12px;
+  font-weight: 700;
+}
+.claim-list {
+  margin: 0;
+  padding-left: 18px;
+}
+.claim-list li {
+  margin: 4px 0;
+  overflow-wrap: anywhere;
+}
+.claim-recommendations {
+  background: var(--whisper-white);
+  border: 2px solid var(--ink-solid);
+}
 
 .results { display: flex; flex-direction: column; gap: 10px; margin-top: 8px; }
 .result-field { display: flex; flex-direction: column; gap: 4px; }

@@ -15,13 +15,23 @@
       <nav class="tabs" role="tablist">
         <button class="tab is-active" data-tab="so" role="tab">SO</button>
         <button class="tab" data-tab="cppt" role="tab">CPPT</button>
-        <button class="tab" data-tab="tindak-lanjut" role="tab">Tindak Lanjut</button>
+        <button class="tab" data-tab="tindak-lanjut" role="tab">Penunjang</button>
+        <button class="tab" data-tab="analisa" role="tab">Analisa</button>
       </nav>
     </header>
 
     <main class="content">
       <!-- SETTING -->
       <section class="panel" data-panel="setting" hidden>
+        <div id="settingsMain" class="settings-main">
+        <label class="field">
+          <span class="label">Sumber API Key</span>
+          <select id="apiKeySource" class="input">
+            <option value="admin">API key admin</option>
+            <option value="personal">API key pribadi</option>
+          </select>
+          <span class="hint">Jika memilih admin atau data pribadi kosong, extension memakai API key admin.</span>
+        </label>
         <label class="field">
           <span class="label">Provider</span>
           <select id="provider" class="input">
@@ -56,6 +66,108 @@
           <button id="saveSettings" class="btn btn-primary">Simpan</button>
         </div>
         <div id="settingsStatus" class="status" hidden></div>
+
+        <div class="settings-group">
+          <span class="label">Admin Knowledge BPJS</span>
+          <label class="field">
+            <span class="label">Username</span>
+            <input id="knowledgeAdminUser" type="text" class="input" placeholder="admin" autocomplete="off" />
+          </label>
+          <label class="field">
+            <span class="label">Password</span>
+            <input id="knowledgeAdminPassword" type="password" class="input" placeholder="Password admin" autocomplete="off" />
+          </label>
+          <button id="knowledgeLogin" class="btn btn-primary" type="button">Masuk Admin</button>
+        </div>
+        </div>
+
+        <div id="knowledgeAdminPanel" class="admin-panel" hidden>
+          <div class="admin-header">
+            <div>
+              <span class="label">Admin Knowledge BPJS</span>
+              <h2 class="section-title">Pengaturan Admin</h2>
+            </div>
+            <button id="exitKnowledgeAdmin" class="btn btn-outline" type="button">Keluar Admin</button>
+          </div>
+          <nav class="admin-tabs" role="tablist">
+            <button class="admin-tab is-active" data-admin-tab="apikey" type="button">Apikey</button>
+            <button class="admin-tab" data-admin-tab="knowledge" type="button">Knowledge</button>
+          </nav>
+
+          <div class="admin-section is-active" data-admin-panel="apikey">
+            <label class="field">
+              <span class="label">Provider Admin</span>
+              <select id="adminProvider" class="input">
+                <option value="gemini">Gemini (Google)</option>
+                <option value="sumopod">Sumopod</option>
+                <option value="aimurah">AImurah</option>
+              </select>
+            </label>
+            <label class="field">
+              <span class="label">API Key Admin</span>
+              <input id="adminApiKey" type="password" class="input" placeholder="API key admin" autocomplete="off" />
+            </label>
+            <label class="field">
+              <span class="label">Model Admin</span>
+              <input id="adminModel" type="text" class="input" placeholder="gemini-2.0-flash / model provider" autocomplete="off" />
+            </label>
+            <div id="adminGeminiFallbackFields" class="settings-group" hidden>
+              <label class="field">
+                <span class="label">Gemini API Key Fallback Admin</span>
+                <input id="adminGeminiFallbackApiKey" type="password" class="input" placeholder="AIza..." autocomplete="off" />
+              </label>
+              <label class="field">
+                <span class="label">Model Gemini Fallback Admin</span>
+                <input id="adminGeminiFallbackModel" type="text" class="input" placeholder="gemini-2.0-flash" autocomplete="off" />
+              </label>
+            </div>
+            <div class="action-row">
+              <button id="validateAdminApiKey" class="btn btn-outline" type="button">Validasi API Key Admin</button>
+              <button id="saveAdminApiKey" class="btn btn-primary" type="button">Simpan API Key Admin</button>
+            </div>
+          </div>
+
+          <div class="admin-section" data-admin-panel="knowledge" hidden>
+            <label class="field">
+              <span class="label">Judul Knowledge</span>
+              <input id="knowledgeTitle" type="text" class="input" placeholder="contoh: Anemia sebagai diagnosis bermakna" />
+            </label>
+            <label class="field">
+              <span class="label">Kategori</span>
+              <input id="knowledgeCategory" type="text" class="input" placeholder="contoh: diagnosis sekunder" />
+            </label>
+            <label class="field">
+              <span class="label">Keywords</span>
+              <input id="knowledgeKeywords" type="text" class="input" placeholder="anemia, hb, transfusi, prc" />
+            </label>
+            <label class="field">
+              <span class="label">Diagnosis Tags</span>
+              <input id="knowledgeDiagnosisTags" type="text" class="input" placeholder="anemia" />
+            </label>
+            <label class="field">
+              <span class="label">Sumber</span>
+              <input id="knowledgeSource" type="text" class="input" placeholder="Pedoman / catatan / halaman" />
+            </label>
+            <label class="field">
+              <span class="label">Isi Knowledge</span>
+              <textarea id="knowledgeContent" class="textarea" rows="6" placeholder="Isi aturan/catatan dokumentasi..."></textarea>
+            </label>
+            <button id="saveKnowledgeManual" class="btn btn-primary" type="button">Simpan Knowledge Manual</button>
+
+            <label class="field">
+              <span class="label">Upload PDF Knowledge</span>
+              <input id="knowledgePdfFile" type="file" class="input" accept="application/pdf" />
+              <span class="hint">PDF akan diekstrak dan dipecah otomatis menjadi chunk.</span>
+            </label>
+            <button id="chunkKnowledgePdf" class="btn btn-outline" type="button">Ekstrak PDF & Buat Chunk</button>
+            <button id="saveKnowledgeChunks" class="btn btn-primary" type="button" disabled>Simpan Semua Chunk</button>
+            <div id="knowledgeChunkPreview" class="pulled-list is-empty">Belum ada chunk PDF.</div>
+
+            <button id="refreshKnowledgeList" class="btn btn-outline" type="button">Muat Knowledge Terakhir</button>
+            <div id="knowledgeList" class="pulled-list is-empty">Belum ada data knowledge.</div>
+          </div>
+        </div>
+        <div id="knowledgeStatus" class="status" hidden></div>
       </section>
 
       <!-- SO -->
@@ -154,6 +266,20 @@
           <span class="label">Data yang ditarik</span>
           <div id="penunjangList" class="pulled-list is-empty">Belum ada data penunjang.</div>
         </div>
+      </section>
+
+      <!-- ANALISA -->
+      <section class="panel" data-panel="analisa" hidden>
+        <p class="note">Analisa kelengkapan dokumentasi resume berdasarkan data SO, CPPT, penunjang, dan knowledge BPJS.</p>
+        <button id="analyzeClaimBpjs" class="btn btn-primary">Analisa Kelayakan Klaim BPJS</button>
+        <div id="claimProgress" class="progress-panel" hidden>
+          <div class="progress-track">
+            <div id="claimProgressBar" class="progress-fill"></div>
+          </div>
+          <div id="claimProgressText" class="progress-text">Menyiapkan analisa...</div>
+        </div>
+        <div id="claimStatus" class="status" hidden></div>
+        <div id="claimAnalysisResult" class="claim-result" hidden></div>
       </section>
     </main>
 

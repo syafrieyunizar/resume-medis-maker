@@ -30,8 +30,41 @@ function activatePanel(target) {
   });
 }
 
+function enterKnowledgeAdminMode() {
+  document.body.classList.add("is-admin-mode");
+  $("#settingsMain").hidden = true;
+  $("#knowledgeAdminPanel").hidden = false;
+  activatePanel("setting");
+}
+
+function exitKnowledgeAdminMode() {
+  document.body.classList.remove("is-admin-mode");
+  $("#settingsMain").hidden = false;
+  $("#knowledgeAdminPanel").hidden = true;
+  activatePanel("setting");
+}
+
+function wait(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function activateAdminTab(target) {
+  $$(".admin-tab").forEach((tab) => {
+    tab.classList.toggle("is-active", tab.dataset.adminTab === target);
+  });
+  $$("[data-admin-panel]").forEach((panel) => {
+    const active = panel.dataset.adminPanel === target;
+    panel.classList.toggle("is-active", active);
+    panel.hidden = !active;
+  });
+}
+
 $$("[data-tab]").forEach((tab) => {
   tab.addEventListener("click", () => activatePanel(tab.dataset.tab));
+});
+
+$$("[data-admin-tab]").forEach((tab) => {
+  tab.addEventListener("click", () => activateAdminTab(tab.dataset.adminTab));
 });
 
 // ---------------- Toast ----------------
@@ -487,6 +520,429 @@ function hasMeaningfulCpptResult(result) {
   return Object.values(result).some((value) => String(value || "").trim() && String(value).trim() !== "-");
 }
 
+function parseCommaList(value) {
+  return String(value || "")
+    .split(",")
+    .map((item) => item.trim().toLowerCase())
+    .filter(Boolean);
+}
+
+async function knowledgeApi(action, payload = {}) {
+  const response = await fetch(KNOWLEDGE_FUNCTION_URL, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      apikey: SUPABASE_ANON_KEY,
+      Authorization: `Bearer ${SUPABASE_ANON_KEY}`,
+    },
+    body: JSON.stringify({ action, ...payload }),
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok || data.error) {
+    if (response.status === 401) {
+      throw new Error(
+        "Supabase menolak akses Edge Function. Pastikan function knowledge-admin sudah deploy dan secret/service role sudah diset."
+      );
+    }
+    throw new Error(data.error || `Knowledge API ${response.status}`);
+  }
+  return data;
+}
+
+async function callAdminAiText({ systemPrompt = "", userPrompt = "", prompt = "", responseJson = false, responseSchema = null }) {
+  const data = await knowledgeApi("ai_generate", {
+    systemPrompt,
+    userPrompt,
+    prompt,
+    responseJson,
+    responseSchema,
+  });
+  return data.text || "";
+}
+
+async function getEffectiveAiSettings() {
+  const settings = await chrome.storage.local.get([
+    "apiKeySource",
+    "apiKey",
+    "model",
+    "provider",
+    "geminiFallbackApiKey",
+    "geminiFallbackModel",
+  ]);
+  const source = settings.apiKeySource || "admin";
+  const hasPersonal = Boolean(settings.apiKey && settings.model && settings.provider);
+  if (source === "personal" && hasPersonal) {
+    return {
+      source: "personal",
+      apiKey: settings.apiKey,
+      model: settings.model,
+      provider: settings.provider,
+      geminiFallbackApiKey: settings.geminiFallbackApiKey || "",
+      geminiFallbackModel: settings.geminiFallbackModel || "gemini-2.0-flash",
+    };
+  }
+  const data = await knowledgeApi("get_ai_config");
+  if (!data.config?.hasApiKey) throw new Error("API key admin belum diset");
+  return {
+    source: "admin",
+    provider: data.config.provider,
+    model: data.config.model,
+    hasGeminiFallback: data.config.hasGeminiFallback,
+    geminiFallbackModel: data.config.geminiFallbackModel || "gemini-2.0-flash",
+  };
+}
+
+function getKnowledgeAuth() {
+  return {
+    username: $("#knowledgeAdminUser").value.trim(),
+    password: $("#knowledgeAdminPassword").value,
+  };
+}
+
+function renderKnowledgeList(chunks) {
+  const list = $("#knowledgeList");
+  if (!chunks?.length) {
+    list.className = "pulled-list is-empty";
+    list.textContent = "Belum ada data knowledge.";
+    return;
+  }
+  list.className = "pulled-list";
+  list.textContent = "";
+  chunks.forEach((chunk) => {
+    const row = document.createElement("div");
+    row.className = "pulled-item";
+
+    const main = document.createElement("div");
+    main.className = "pulled-item-main";
+
+    const title = document.createElement("div");
+    title.className = "pulled-item-title";
+    title.textContent = chunk.title || "Knowledge";
+
+    const meta = document.createElement("div");
+    meta.className = "pulled-item-meta";
+    meta.textContent = `${chunk.category || "Tanpa kategori"} - ${(chunk.keywords || []).join(", ")}`;
+
+    const remove = document.createElement("button");
+    remove.type = "button";
+    remove.className = "btn-remove";
+    remove.textContent = "X";
+    remove.setAttribute("aria-label", "Hapus knowledge");
+    remove.addEventListener("click", async () => {
+      const status = $("#knowledgeStatus");
+      try {
+        await knowledgeApi("delete", { ...getKnowledgeAuth(), id: chunk.id });
+        status.hidden = false;
+        status.className = "status";
+        status.textContent = "Knowledge dihapus.";
+        await loadKnowledgeList();
+      } catch (e) {
+        status.hidden = false;
+        status.className = "status is-error";
+        status.textContent = "Gagal hapus: " + e.message;
+      }
+    });
+
+    main.append(title, meta);
+    row.append(main, remove);
+    list.append(row);
+  });
+}
+
+function renderChunkPreview(chunks) {
+  const preview = $("#knowledgeChunkPreview");
+  if (!chunks.length) {
+    preview.className = "pulled-list is-empty";
+    preview.textContent = "Belum ada chunk PDF.";
+    return;
+  }
+  preview.className = "pulled-list";
+  preview.textContent = "";
+  chunks.slice(0, 8).forEach((chunk, idx) => {
+    const row = document.createElement("div");
+    row.className = "pulled-item";
+    const main = document.createElement("div");
+    main.className = "pulled-item-main";
+    const title = document.createElement("div");
+    title.className = "pulled-item-title";
+    title.textContent = `${idx + 1}. ${chunk.title}`;
+    const meta = document.createElement("div");
+    meta.className = "pulled-item-meta";
+    meta.textContent = chunk.content.slice(0, 160);
+    main.append(title, meta);
+    row.append(main);
+    preview.append(row);
+  });
+}
+
+function splitTextIntoChunks(text, maxLength = 1800) {
+  const paragraphs = text
+    .split(/\n{2,}/)
+    .map((part) => part.trim())
+    .filter(Boolean);
+  const chunks = [];
+  let current = "";
+  paragraphs.forEach((paragraph) => {
+    if ((current + "\n\n" + paragraph).length > maxLength && current) {
+      chunks.push(current.trim());
+      current = paragraph;
+    } else {
+      current = current ? `${current}\n\n${paragraph}` : paragraph;
+    }
+  });
+  if (current.trim()) chunks.push(current.trim());
+  return chunks;
+}
+
+async function extractKnowledgePdfChunks(file) {
+  if (!window.pdfjsLib) throw new Error("PDF.js belum tersedia");
+  const buffer = await file.arrayBuffer();
+  const doc = await window.pdfjsLib.getDocument({ data: buffer.slice(0) }).promise;
+  const chunks = [];
+  for (let pageNo = 1; pageNo <= doc.numPages; pageNo += 1) {
+    const page = await doc.getPage(pageNo);
+    const textContent = await page.getTextContent();
+    const lines = groupTextItemsIntoLines(textContent.items);
+    const pageText = lines.join("\n");
+    splitTextIntoChunks(pageText).forEach((content, idx) => {
+      chunks.push({
+        title: `${file.name} - Hal ${pageNo}${idx ? `.${idx + 1}` : ""}`,
+        content,
+        category: $("#knowledgeCategory").value.trim() || "aturan bpjs",
+        keywords: parseCommaList($("#knowledgeKeywords").value),
+        diagnosis_tags: parseCommaList($("#knowledgeDiagnosisTags").value),
+        source_name: file.name,
+        source_page: pageNo,
+        active: true,
+      });
+    });
+  }
+  return chunks;
+}
+
+function collectResumeForClaimAnalysis() {
+  const cppt = {};
+  $$("#cpptResults textarea").forEach((ta) => {
+    cppt[ta.dataset.key] = ta.value || "";
+  });
+  return {
+    periode_rawat: state.cpptSummary?.periodText || "",
+    subjektif: $("#soSubjektif").value || "",
+    objektif: $("#soObjektif").value || "",
+    cppt: {
+      penunjang: cppt.penunjang || "",
+      terapi_dirawat: cppt.terapi_dirawat || "",
+      operasi: cppt.operasi || "",
+      dx_utama: cppt.dx_utama || "",
+      dx_sekunder: cppt.dx_sekunder || "",
+      konsul: cppt.konsul || "",
+      terapi_pulang: cppt.terapi_pulang || "",
+    },
+    penunjang_dari_cppt: state.cpptPenunjang || "",
+    penunjang_tindak_lanjut: $("#penunjangSummary").value || "",
+  };
+}
+
+function extractClaimKeywords(resume) {
+  const text = JSON.stringify(resume).toLowerCase();
+  const medicalTerms = [
+    "anemia",
+    "transfusi",
+    "prc",
+    "hb",
+    "sepsis",
+    "pneumonia",
+    "ckd",
+    "aki",
+    "gagal ginjal",
+    "stroke",
+    "diabetes",
+    "dm",
+    "hipertensi",
+    "operasi",
+    "icu",
+    "ventilator",
+    "infeksi",
+    "kultur",
+    "syok",
+    "perdarahan",
+    "chf",
+    "cad",
+  ];
+  const found = medicalTerms.filter((term) => text.includes(term));
+  const dxWords = `${resume.cppt?.dx_utama || ""},${resume.cppt?.dx_sekunder || ""}`
+    .toLowerCase()
+    .split(/[^a-z0-9]+/i)
+    .filter((word) => word.length >= 4);
+  return Array.from(new Set([...found, ...dxWords])).slice(0, 20);
+}
+
+function formatClaimAnalysisPrompt(resume, chunks) {
+  return `Kamu adalah seorang dokter casemix. Analisa kelengkapan dokumentasi resume medis agar risiko pending klaim BPJS lebih kecil.
+
+BATASAN:
+- Jangan menyarankan manipulasi diagnosis/klaim.
+- Jangan menyarankan tindakan medis baru demi klaim.
+- Fokus pada gap dokumentasi: diagnosis, bukti klinis, penunjang, terapi, monitoring, tindakan, dan konsistensi resume.
+- Gunakan knowledge yang diberikan sebagai dasar.
+- Jika data tidak ditemukan di RESUME, tulis sebagai bukti belum ditemukan, bukan mengarang.
+- Jika data ada di RESUME, jangan menyebut kosong.
+- Jawaban wajib JSON valid saja, tanpa markdown, tanpa teks pembuka/penutup.
+
+FORMAT JSON WAJIB:
+{
+  "risk": "Rendah|Sedang|Tinggi",
+  "summary": "Ringkasan singkat risiko pending.",
+  "critical_findings": [
+    {
+      "title": "Judul temuan",
+      "evidence_found": ["Bukti yang ditemukan dari resume"],
+      "missing_evidence": ["Bukti yang belum ditemukan"],
+      "suggestion": "Saran kelengkapan resume, bukan manipulasi klaim.",
+      "severity": "critical|warning|info"
+    }
+  ],
+  "found_evidence": ["Bukti penting yang sudah ada"],
+  "missing_evidence": ["Bukti penting yang belum ada"],
+  "recommendations": ["Saran kelengkapan resume"]
+}
+
+RESUME:
+${JSON.stringify(resume, null, 2)}
+
+KNOWLEDGE RELEVAN:
+${JSON.stringify(chunks.slice(0, 15), null, 2)}`;
+}
+
+async function callProviderText({ provider, apiKey, model, prompt }) {
+  if (provider === "gemini") {
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(
+      model
+    )}:generateContent?key=${encodeURIComponent(apiKey)}`;
+    const res = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        contents: [{ role: "user", parts: [{ text: prompt }] }],
+        generationConfig: { temperature: 0.2, responseMimeType: "application/json" },
+      }),
+    });
+    if (!res.ok) throw new Error("Gemini API " + res.status + ": " + (await res.text()).slice(0, 200));
+    const data = await res.json();
+    return data?.candidates?.[0]?.content?.parts?.[0]?.text || "";
+  }
+
+  const endpoint = PROVIDERS[provider]?.url;
+  if (!endpoint) throw new Error("Provider tidak dikenal: " + provider);
+  const res = await fetch(endpoint, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${apiKey}`,
+    },
+    body: JSON.stringify({
+      model,
+      messages: [{ role: "user", content: prompt }],
+      temperature: 0.2,
+    }),
+  });
+  if (!res.ok) throw new Error("API " + res.status + ": " + (await res.text()).slice(0, 200));
+  const data = await res.json();
+  return data?.choices?.[0]?.message?.content || "";
+}
+
+function normalizeArray(value) {
+  if (Array.isArray(value)) return value.map((item) => String(item || "").trim()).filter(Boolean);
+  if (typeof value === "string" && value.trim()) return [value.trim()];
+  return [];
+}
+
+function normalizeClaimAnalysis(data) {
+  const risk = ["Rendah", "Sedang", "Tinggi"].includes(data?.risk) ? data.risk : "Sedang";
+  const findings = Array.isArray(data?.critical_findings) ? data.critical_findings : [];
+  return {
+    risk,
+    summary: String(data?.summary || "").trim(),
+    critical_findings: findings.map((item) => ({
+      title: String(item?.title || "Temuan").trim(),
+      evidence_found: normalizeArray(item?.evidence_found),
+      missing_evidence: normalizeArray(item?.missing_evidence),
+      suggestion: String(item?.suggestion || "").trim(),
+      severity: ["critical", "warning", "info"].includes(item?.severity) ? item.severity : "warning",
+    })),
+    found_evidence: normalizeArray(data?.found_evidence),
+    missing_evidence: normalizeArray(data?.missing_evidence),
+    recommendations: normalizeArray(data?.recommendations),
+  };
+}
+
+function appendList(parent, title, items, extraClass = "") {
+  if (!items.length) return;
+  const section = document.createElement("div");
+  section.className = "claim-section" + (extraClass ? " " + extraClass : "");
+  const heading = document.createElement("div");
+  heading.className = "claim-section-title";
+  heading.textContent = title;
+  const list = document.createElement("ul");
+  list.className = "claim-list";
+  items.forEach((item) => {
+    const li = document.createElement("li");
+    li.textContent = item;
+    list.append(li);
+  });
+  section.append(heading, list);
+  parent.append(section);
+}
+
+function renderClaimAnalysis(rawAnalysis) {
+  const result = $("#claimAnalysisResult");
+  const analysis = normalizeClaimAnalysis(rawAnalysis);
+  result.hidden = false;
+  result.className = "claim-result";
+  result.textContent = "";
+
+  const riskCard = document.createElement("div");
+  const riskClass = analysis.risk === "Tinggi" ? "is-high" : analysis.risk === "Sedang" ? "is-medium" : "is-low";
+  riskCard.className = `claim-card claim-risk ${riskClass}`;
+  const riskTitle = document.createElement("div");
+  riskTitle.className = "claim-card-title";
+  riskTitle.textContent = `Risiko pending: ${analysis.risk}`;
+  const summary = document.createElement("p");
+  summary.className = "claim-summary";
+  summary.textContent = analysis.summary || "Tidak ada ringkasan.";
+  riskCard.append(riskTitle, summary);
+  result.append(riskCard);
+
+  if (analysis.critical_findings.length) {
+    const wrap = document.createElement("div");
+    wrap.className = "claim-section";
+    const heading = document.createElement("div");
+    heading.className = "claim-section-title";
+    heading.textContent = "Temuan Utama";
+    wrap.append(heading);
+    analysis.critical_findings.forEach((finding) => {
+      const card = document.createElement("div");
+      card.className = "claim-card";
+      const badge = document.createElement("span");
+      badge.className = `claim-badge is-${finding.severity}`;
+      badge.textContent = finding.severity;
+      const title = document.createElement("div");
+      title.className = "claim-card-title";
+      title.textContent = finding.title;
+      card.append(badge, title);
+      appendList(card, "Bukti ditemukan", finding.evidence_found);
+      appendList(card, "Bukti belum ditemukan", finding.missing_evidence);
+      if (finding.suggestion) appendList(card, "Saran", [finding.suggestion], "claim-recommendations");
+      wrap.append(card);
+    });
+    result.append(wrap);
+  }
+
+  appendList(result, "Bukti Ditemukan", analysis.found_evidence);
+  appendList(result, "Bukti Belum Ditemukan", analysis.missing_evidence);
+  appendList(result, "Saran Kelengkapan Resume", analysis.recommendations, "claim-card claim-recommendations");
+}
+
 function parseFlexibleDate(value) {
   if (!value) return null;
   const text = String(value).trim();
@@ -617,6 +1073,11 @@ const PROVIDERS = {
   sumopod: { label: "Sumopod", url: "https://ai.sumopod.com/v1/chat/completions" },
   aimurah: { label: "AImurah", url: "https://aimurah.my.id/api/v1/chat/completions" },
 };
+
+const KNOWLEDGE_FUNCTION_URL =
+  "https://yvcqgwpfjoxhuyhxuiry.supabase.co/functions/v1/knowledge-admin";
+const SUPABASE_ANON_KEY =
+  "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inl2Y3Fnd3Bmam94aHV5aHh1aXJ5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzg0NzkxOTIsImV4cCI6MjA5NDA1NTE5Mn0.cSVjIjIpC9hlm8Sb5nISxUitoRHtEL0pC6ZphQ9SxLw";
 
 const penunjangSystemPrompt =
   `Kamu adalah dokter DPJP yang merangkum pemeriksaan penunjang bermakna dari data rekam medis.
@@ -773,25 +1234,44 @@ function syncSettingsFields(provider, modelValue) {
   if (modelInput) modelInput.value = modelValue || (isGemini ? "gemini-2.0-flash" : "");
 }
 
+function syncApiKeySourceFields() {
+  const useAdmin = $("#apiKeySource").value === "admin";
+  ["provider", "apiKey", "model", "geminiFallbackApiKey", "geminiFallbackModel", "validateApiKey"].forEach((id) => {
+    const el = $("#" + id);
+    if (el) el.disabled = useAdmin;
+  });
+}
+
+function syncAdminSettingsFields(provider, modelValue) {
+  const isGemini = provider === "gemini";
+  const fallbackFields = $("#adminGeminiFallbackFields");
+  if (fallbackFields) fallbackFields.hidden = isGemini;
+  if ($("#adminModel")) $("#adminModel").value = modelValue || (isGemini ? "gemini-2.0-flash" : "");
+}
+
 async function loadSettings() {
   const {
+    apiKeySource = "admin",
     apiKey = "",
     model = "gemini-2.0-flash",
     provider = "gemini",
     geminiFallbackApiKey = "",
     geminiFallbackModel = "gemini-2.0-flash",
   } = await chrome.storage.local.get([
+    "apiKeySource",
     "apiKey",
     "model",
     "provider",
     "geminiFallbackApiKey",
     "geminiFallbackModel",
   ]);
+  $("#apiKeySource").value = apiKeySource;
   $("#apiKey").value = apiKey;
   $("#provider").value = provider;
   $("#geminiFallbackApiKey").value = geminiFallbackApiKey;
   $("#geminiFallbackModel").value = geminiFallbackModel;
   syncSettingsFields(provider, model);
+  syncApiKeySourceFields();
 }
 loadSettings();
 
@@ -799,18 +1279,26 @@ $("#provider").addEventListener("change", () => {
   syncSettingsFields($("#provider").value, $("#model").value.trim());
 });
 
+$("#apiKeySource").addEventListener("change", syncApiKeySourceFields);
+
+$("#adminProvider").addEventListener("change", () => {
+  syncAdminSettingsFields($("#adminProvider").value, $("#adminModel").value.trim());
+});
+
 function getCurrentModel() {
   return $("#model").value.trim();
 }
 
 $("#saveSettings").addEventListener("click", async () => {
+  const apiKeySource = $("#apiKeySource").value;
   const provider = $("#provider").value;
   const model = getCurrentModel();
-  if (!model) {
+  if (apiKeySource === "personal" && !model) {
     toast("Model wajib diisi", "error");
     return;
   }
   await chrome.storage.local.set({
+    apiKeySource,
     apiKey: $("#apiKey").value.trim(),
     model,
     provider,
@@ -871,6 +1359,189 @@ $("#validateApiKey").addEventListener("click", async () => {
     button.disabled = false;
   }
 });
+
+let pendingKnowledgeChunks = [];
+
+async function loadKnowledgeList() {
+  const status = $("#knowledgeStatus");
+  try {
+    const data = await knowledgeApi("list", getKnowledgeAuth());
+    renderKnowledgeList(data.chunks || []);
+  } catch (e) {
+    status.hidden = false;
+    status.className = "status is-error";
+    status.textContent = "Gagal memuat knowledge: " + e.message;
+  }
+}
+
+function collectAdminAiForm() {
+  return {
+    provider: $("#adminProvider").value,
+    api_key: $("#adminApiKey").value.trim(),
+    model: $("#adminModel").value.trim(),
+    gemini_fallback_api_key: $("#adminGeminiFallbackApiKey").value.trim(),
+    gemini_fallback_model: $("#adminGeminiFallbackModel").value.trim() || "gemini-2.0-flash",
+  };
+}
+
+async function loadAdminAiConfig() {
+  const data = await knowledgeApi("get_ai_config");
+  const config = data.config;
+  if (!config) {
+    syncAdminSettingsFields($("#adminProvider").value, $("#adminModel").value.trim());
+    return;
+  }
+  $("#adminProvider").value = config.provider || "gemini";
+  $("#adminModel").value = config.model || "gemini-2.0-flash";
+  $("#adminApiKey").value = "";
+  $("#adminGeminiFallbackApiKey").value = "";
+  $("#adminGeminiFallbackModel").value = config.geminiFallbackModel || "gemini-2.0-flash";
+  syncAdminSettingsFields($("#adminProvider").value, $("#adminModel").value.trim());
+}
+
+$("#knowledgeLogin").addEventListener("click", async () => {
+  const status = $("#knowledgeStatus");
+  status.hidden = false;
+  status.className = "status is-loading";
+  status.textContent = "Memeriksa login admin...";
+  try {
+    await knowledgeApi("login", getKnowledgeAuth());
+    enterKnowledgeAdminMode();
+    status.className = "status is-success";
+    status.textContent = "Admin aktif. Knowledge bisa dikelola.";
+    await loadAdminAiConfig();
+    await loadKnowledgeList();
+  } catch (e) {
+    $("#knowledgeAdminPanel").hidden = true;
+    status.className = "status is-error";
+    status.textContent = "Login gagal: " + e.message;
+  }
+});
+
+$("#validateAdminApiKey").addEventListener("click", async () => {
+  const status = $("#knowledgeStatus");
+  status.hidden = false;
+  status.className = "status is-loading";
+  status.textContent = "Memvalidasi API key admin...";
+  try {
+    await knowledgeApi("validate_ai_config", {
+      ...getKnowledgeAuth(),
+      config: collectAdminAiForm(),
+    });
+    status.className = "status is-success";
+    status.textContent = "API key admin aktif.";
+    toast("API key admin aktif", "success");
+  } catch (e) {
+    status.className = "status is-error";
+    status.textContent = "Validasi admin gagal: " + e.message;
+  }
+});
+
+$("#saveAdminApiKey").addEventListener("click", async () => {
+  const status = $("#knowledgeStatus");
+  status.hidden = false;
+  status.className = "status is-loading";
+  status.textContent = "Menyimpan API key admin...";
+  try {
+    await knowledgeApi("save_ai_config", {
+      ...getKnowledgeAuth(),
+      config: collectAdminAiForm(),
+    });
+    $("#adminApiKey").value = "";
+    $("#adminGeminiFallbackApiKey").value = "";
+    status.className = "status is-success";
+    status.textContent = "API key admin tersimpan. User dapat memakai sumber API key admin.";
+    toast("API key admin tersimpan", "success");
+  } catch (e) {
+    status.className = "status is-error";
+    status.textContent = "Gagal simpan API key admin: " + e.message;
+  }
+});
+
+$("#exitKnowledgeAdmin").addEventListener("click", () => {
+  exitKnowledgeAdminMode();
+  const status = $("#knowledgeStatus");
+  status.hidden = true;
+});
+
+$("#saveKnowledgeManual").addEventListener("click", async () => {
+  const status = $("#knowledgeStatus");
+  status.hidden = false;
+  status.className = "status is-loading";
+  status.textContent = "Menyimpan knowledge manual...";
+  try {
+    await knowledgeApi("create", {
+      ...getKnowledgeAuth(),
+      chunk: {
+        title: $("#knowledgeTitle").value,
+        content: $("#knowledgeContent").value,
+        category: $("#knowledgeCategory").value,
+        keywords: parseCommaList($("#knowledgeKeywords").value),
+        diagnosis_tags: parseCommaList($("#knowledgeDiagnosisTags").value),
+        source_name: $("#knowledgeSource").value,
+        active: true,
+      },
+    });
+    status.className = "status";
+    status.textContent = "Knowledge manual tersimpan.";
+    $("#knowledgeTitle").value = "";
+    $("#knowledgeContent").value = "";
+    await loadKnowledgeList();
+  } catch (e) {
+    status.className = "status is-error";
+    status.textContent = "Gagal simpan: " + e.message;
+  }
+});
+
+$("#chunkKnowledgePdf").addEventListener("click", async () => {
+  const status = $("#knowledgeStatus");
+  const file = $("#knowledgePdfFile").files?.[0];
+  if (!file) {
+    toast("Pilih PDF dulu", "error");
+    return;
+  }
+  status.hidden = false;
+  status.className = "status is-loading";
+  status.textContent = "Mengekstrak PDF knowledge...";
+  try {
+    pendingKnowledgeChunks = await extractKnowledgePdfChunks(file);
+    renderChunkPreview(pendingKnowledgeChunks);
+    $("#saveKnowledgeChunks").disabled = pendingKnowledgeChunks.length === 0;
+    status.className = "status";
+    status.textContent = `${pendingKnowledgeChunks.length} chunk berhasil dibuat dari PDF.`;
+  } catch (e) {
+    pendingKnowledgeChunks = [];
+    renderChunkPreview([]);
+    $("#saveKnowledgeChunks").disabled = true;
+    status.className = "status is-error";
+    status.textContent = "Gagal ekstrak PDF: " + e.message;
+  }
+});
+
+$("#saveKnowledgeChunks").addEventListener("click", async () => {
+  const status = $("#knowledgeStatus");
+  if (!pendingKnowledgeChunks.length) return;
+  status.hidden = false;
+  status.className = "status is-loading";
+  status.textContent = "Menyimpan chunk PDF ke Supabase...";
+  try {
+    await knowledgeApi("bulk_create", {
+      ...getKnowledgeAuth(),
+      chunks: pendingKnowledgeChunks,
+    });
+    status.className = "status";
+    status.textContent = `${pendingKnowledgeChunks.length} chunk tersimpan.`;
+    pendingKnowledgeChunks = [];
+    renderChunkPreview([]);
+    $("#saveKnowledgeChunks").disabled = true;
+    await loadKnowledgeList();
+  } catch (e) {
+    status.className = "status is-error";
+    status.textContent = "Gagal simpan chunk: " + e.message;
+  }
+});
+
+$("#refreshKnowledgeList").addEventListener("click", loadKnowledgeList);
 
 // ---------------- SO: Insert detail ----------------
 const pullSOButton = $("#pullSO");
@@ -1047,19 +1718,6 @@ aksesBtn.addEventListener("click", async () => {
 
 // ---------------- CPPT: Extract via Gemini ----------------
 extractBtn.addEventListener("click", async () => {
-  const {
-    apiKey,
-    model = "gemini-2.0-flash",
-    provider = "gemini",
-  } = await chrome.storage.local.get(["apiKey", "model", "provider"]);
-  if (!apiKey) {
-    toast("Isi API Key di tab Setting dulu", "error");
-    return;
-  }
-  if (!model) {
-    toast("Model belum diatur", "error");
-    return;
-  }
   if (!state.cpptText) {
     toast("Akses CPPT terlebih dahulu", "error");
     return;
@@ -1068,7 +1726,6 @@ extractBtn.addEventListener("click", async () => {
   const status = $("#cpptStatus");
   status.hidden = false;
   status.className = "status is-loading";
-  status.textContent = `Memproses dengan ${PROVIDERS[provider]?.label || provider}...`;
   extractBtn.disabled = true;
 
   const systemPrompt =
@@ -1116,16 +1773,25 @@ Berikan output untuk: Pemeriksaan Penunjang Bermakna, Terapi Selama Dirawat, Ope
   };
 
   try {
+    const ai = await getEffectiveAiSettings();
+    status.textContent = `Memproses dengan ${ai.source === "admin" ? "API key admin" : PROVIDERS[ai.provider]?.label || ai.provider}...`;
     const userMsg =
       "Data CPPT:\n\n" +
       state.cpptText +
       "\n\nKembalikan JSON object dengan key PERSIS berikut: penunjang, terapi_dirawat, operasi, dx_utama, dx_sekunder, konsul, terapi_pulang. Jangan gunakan key lain. Setiap field berisi ringkasan singkat, padat, detail bermakna. Jika tidak ada data, isi dengan '-'.";
 
     let text;
-    if (provider === "gemini") {
+    if (ai.source === "admin") {
+      text = await callAdminAiText({
+        systemPrompt,
+        userPrompt: userMsg,
+        responseJson: true,
+        responseSchema: schema,
+      });
+    } else if (ai.provider === "gemini") {
       const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(
-        model
-      )}:generateContent?key=${encodeURIComponent(apiKey)}`;
+        ai.model
+      )}:generateContent?key=${encodeURIComponent(ai.apiKey)}`;
       const body = {
         systemInstruction: { parts: [{ text: systemPrompt }] },
         contents: [{ role: "user", parts: [{ text: userMsg }] }],
@@ -1148,10 +1814,10 @@ Berikan output untuk: Pemeriksaan Penunjang Bermakna, Terapi Selama Dirawat, Ope
       text = data?.candidates?.[0]?.content?.parts?.[0]?.text;
     } else {
       // OpenAI-compatible: Sumopod, AImurah
-      const endpoint = PROVIDERS[provider]?.url;
-      if (!endpoint) throw new Error("Provider tidak dikenal: " + provider);
+      const endpoint = PROVIDERS[ai.provider]?.url;
+      if (!endpoint) throw new Error("Provider tidak dikenal: " + ai.provider);
       const body = {
-        model,
+        model: ai.model,
         messages: [
           { role: "system", content: systemPrompt },
           { role: "user", content: userMsg },
@@ -1163,7 +1829,7 @@ Berikan output untuk: Pemeriksaan Penunjang Bermakna, Terapi Selama Dirawat, Ope
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${apiKey}`,
+          Authorization: `Bearer ${ai.apiKey}`,
         },
         body: JSON.stringify(body),
       });
@@ -1379,25 +2045,8 @@ async function pullPenunjangData({ filterByPeriod }) {
 
 // ---------------- Tindak Lanjut: Rangkum penunjang PDF ----------------
 summarizePenunjangBtn.addEventListener("click", async () => {
-  const {
-    apiKey,
-    model = "gemini-2.0-flash",
-    provider = "gemini",
-    geminiFallbackApiKey = "",
-    geminiFallbackModel = "gemini-2.0-flash",
-  } = await chrome.storage.local.get([
-    "apiKey",
-    "model",
-    "provider",
-    "geminiFallbackApiKey",
-    "geminiFallbackModel",
-  ]);
   const status = $("#penunjangStatus");
 
-  if (!apiKey) {
-    toast("Isi API Key di Setting dulu", "error");
-    return;
-  }
   if (!state.penunjangFiles.length) {
     toast("Tarik data penunjang terlebih dahulu", "error");
     return;
@@ -1409,13 +2058,28 @@ summarizePenunjangBtn.addEventListener("click", async () => {
   summarizePenunjangBtn.disabled = true;
 
   try {
+    const ai = await getEffectiveAiSettings();
     let summary = "";
 
-    if (provider === "gemini") {
+    if (ai.source === "admin") {
+      status.textContent = "Mencoba parser lokal PDF.js untuk API key admin...";
+      for (const file of state.penunjangFiles) {
+        file.parsed = await extractPdfWithPdfJs(file);
+        if (!file.resultDate) file.resultDate = file.parsed.structured?.date || "";
+      }
+      const parsedDocs = compactParsedDocs(state.penunjangFiles);
+      status.textContent = "Merangkum dengan API key admin...";
+      summary = await callAdminAiText({
+        systemPrompt: penunjangSystemPrompt,
+        userPrompt:
+          "Rangkum pemeriksaan penunjang bermakna dari hasil ekstraksi PDF berikut:\n\n" +
+          JSON.stringify(parsedDocs),
+      });
+    } else if (ai.provider === "gemini") {
       status.textContent = "Merangkum PDF langsung dengan Gemini...";
       summary = await callGeminiForPenunjangPdf({
-        apiKey,
-        model,
+        apiKey: ai.apiKey,
+        model: ai.model,
         files: state.penunjangFiles,
       });
     } else {
@@ -1427,23 +2091,23 @@ summarizePenunjangBtn.addEventListener("click", async () => {
         }
 
         const parsedDocs = compactParsedDocs(state.penunjangFiles);
-        status.textContent = `PDF berhasil diekstrak. Merangkum dengan ${PROVIDERS[provider]?.label || provider}...`;
+        status.textContent = `PDF berhasil diekstrak. Merangkum dengan ${PROVIDERS[ai.provider]?.label || ai.provider}...`;
         summary = await callOpenAiCompatibleForPenunjang({
-          provider,
-          apiKey,
-          model,
+          provider: ai.provider,
+          apiKey: ai.apiKey,
+          model: ai.model,
           parsedDocs,
         });
       } catch (primaryError) {
-        if (!geminiFallbackApiKey) {
+        if (!ai.geminiFallbackApiKey) {
           throw new Error(
-            `${PROVIDERS[provider]?.label || provider}/parser gagal: ${primaryError.message}. Gemini API fallback belum diisi.`
+            `${PROVIDERS[ai.provider]?.label || ai.provider}/parser gagal: ${primaryError.message}. Gemini API fallback belum diisi.`
           );
         }
-        status.textContent = `Gagal menggunakan ${PROVIDERS[provider]?.label || provider}/parser: ${primaryError.message}. Melanjutkan dengan Gemini API fallback...`;
+        status.textContent = `Gagal menggunakan ${PROVIDERS[ai.provider]?.label || ai.provider}/parser: ${primaryError.message}. Melanjutkan dengan Gemini API fallback...`;
         summary = await callGeminiForPenunjangPdf({
-          apiKey: geminiFallbackApiKey,
-          model: geminiFallbackModel,
+          apiKey: ai.geminiFallbackApiKey,
+          model: ai.geminiFallbackModel,
           files: state.penunjangFiles,
         });
       }
@@ -1552,5 +2216,84 @@ $("#insertPenunjangResume").addEventListener("click", async () => {
   } catch (e) {
     console.error(e);
     toast("Gagal: " + e.message, "error");
+  }
+});
+
+// ---------------- Analisa: Kelayakan klaim BPJS ----------------
+$("#analyzeClaimBpjs").addEventListener("click", async () => {
+  const status = $("#claimStatus");
+  const progress = $("#claimProgress");
+  const progressBar = $("#claimProgressBar");
+  const progressText = $("#claimProgressText");
+  const result = $("#claimAnalysisResult");
+  const button = $("#analyzeClaimBpjs");
+  let percent = 0;
+  let timer = null;
+  const startedAt = Date.now();
+  const setProgress = async (message, nextPercent) => {
+    percent = Math.max(percent, nextPercent);
+    progress.hidden = false;
+    progressBar.className = "progress-fill";
+    progressBar.style.width = `${percent}%`;
+    progressText.textContent = message;
+    status.hidden = false;
+    status.className = "status is-loading";
+    status.textContent = message;
+    await wait(250);
+  };
+  button.disabled = true;
+  result.hidden = true;
+  result.textContent = "";
+
+  try {
+    await setProgress("Membaca form extension...", 8);
+    const resume = collectResumeForClaimAnalysis();
+    await setProgress("Memeriksa Subjektif...", 18);
+    await setProgress("Memeriksa Objektif...", 28);
+    await setProgress("Memeriksa Rangkuman CPPT...", 42);
+    await setProgress("Memeriksa Penunjang...", 55);
+    await setProgress("Memeriksa Knowledge...", 68);
+    const keywords = extractClaimKeywords(resume);
+    const knowledge = await knowledgeApi("search", { keywords });
+    const chunks = (knowledge.chunks || []).slice(0, 15);
+
+    await setProgress(`Proses Analisa dengan AI memakai ${chunks.length} knowledge relevan...`, 78);
+    timer = setInterval(() => {
+      const elapsed = Math.floor((Date.now() - startedAt) / 1000);
+      if (percent < 92) {
+        percent += 1;
+        progressBar.style.width = `${percent}%`;
+      }
+      const message = `Proses Analisa dengan AI... ${elapsed} detik`;
+      progressText.textContent = message;
+      status.textContent = message + ". Biasanya 20-90 detik tergantung panjang resume dan provider.";
+    }, 1000);
+    const prompt = formatClaimAnalysisPrompt(resume, chunks);
+    const ai = await getEffectiveAiSettings();
+    const analysis =
+      ai.source === "admin"
+        ? await callAdminAiText({ prompt, responseJson: true })
+        : await callProviderText({ provider: ai.provider, apiKey: ai.apiKey, model: ai.model, prompt });
+    if (!analysis.trim()) throw new Error("Respons analisa kosong dari provider");
+
+    clearInterval(timer);
+    timer = null;
+    await setProgress("Hampir selesai...", 96);
+    const parsed = parseJsonResponse(analysis);
+    renderClaimAnalysis(parsed);
+    progressBar.style.width = "100%";
+    progressBar.className = "progress-fill is-success";
+    progressText.textContent = "Analisa telah selesai.";
+    status.className = "status is-success";
+    status.textContent = "Analisa telah selesai.";
+    toast("Analisa klaim selesai", "success");
+  } catch (e) {
+    if (timer) clearInterval(timer);
+    console.error(e);
+    status.className = "status is-error";
+    status.textContent = "Gagal analisa klaim: " + e.message;
+    toast("Gagal analisa klaim", "error");
+  } finally {
+    button.disabled = false;
   }
 });
