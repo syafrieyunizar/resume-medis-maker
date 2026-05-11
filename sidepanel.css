@@ -39,12 +39,39 @@ html, body {
   padding: 16px 16px 0;
 }
 
+.header-top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
 .app-title {
   font-family: var(--font-heading);
   font-weight: 700;
   font-size: 20px;
   letter-spacing: -0.04em;
   margin: 0 0 12px;
+  color: var(--ink-solid);
+}
+
+.settings-button {
+  appearance: none;
+  background: transparent;
+  border: 1px solid var(--cloud-gray);
+  border-radius: 9px;
+  color: var(--subtle-gray);
+  cursor: pointer;
+  font-family: var(--font-body);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1;
+  padding: 6px 8px;
+  transition: border-color 0.15s, color 0.15s;
+}
+.settings-button:hover,
+.settings-button.is-active {
+  border-color: var(--ink-solid);
   color: var(--ink-solid);
 }
 
@@ -80,6 +107,14 @@ html, body {
 .panel[hidden] { display: none; }
 
 .field { display: flex; flex-direction: column; gap: 6px; }
+.settings-group {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  border-top: 1px solid var(--cloud-gray);
+  padding-top: 12px;
+}
+.settings-group[hidden] { display: none; }
 .label {
   font-size: 12px;
   font-weight: 600;
@@ -101,6 +136,7 @@ html, body {
   transition: border-color 0.15s, box-shadow 0.15s;
 }
 .textarea { resize: vertical; min-height: 80px; line-height: 1.5; }
+.textarea-long { min-height: 180px; }
 .input:focus, .textarea:focus {
   border-color: var(--electric-violet);
   box-shadow: 0 0 0 3px rgba(123, 104, 238, 0.15);
@@ -115,7 +151,7 @@ html, body {
   border-radius: 9px;
   padding: 9px 14px;
   cursor: pointer;
-  transition: background 0.15s, color 0.15s, border-color 0.15s, opacity 0.15s;
+  transition: background 0.45s ease, color 0.45s ease, border-color 0.45s ease, opacity 0.15s;
 }
 .btn:disabled { opacity: 0.5; cursor: not-allowed; }
 
@@ -137,6 +173,11 @@ html, body {
   color: var(--canvas-white);
 }
 
+.btn-error {
+  background: #b91c1c;
+  color: var(--canvas-white);
+}
+
 .note {
   font-size: 13px;
   color: var(--subtle-gray);
@@ -153,11 +194,111 @@ html, body {
   border-radius: 9px;
   background: var(--whisper-white);
 }
+.cppt-summary strong {
+  color: var(--ink-solid);
+  font-weight: 700;
+}
+.cppt-summary-line + .cppt-summary-line {
+  margin-top: 3px;
+}
 .status.is-error { color: #b91c1c; background: #fee2e2; }
 .status.is-loading { color: var(--deep-violet); background: rgba(123, 104, 238, 0.08); }
 
 .results { display: flex; flex-direction: column; gap: 10px; margin-top: 8px; }
 .result-field { display: flex; flex-direction: column; gap: 4px; }
+
+.action-row {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.confirm-box {
+  border: 1px solid var(--cloud-gray);
+  border-radius: 9px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+}
+.confirm-box[hidden] { display: none; }
+
+.confirm-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.pulled-data {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.pulled-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.pulled-list.is-empty {
+  color: var(--ash-gray);
+  font-size: 12px;
+}
+
+.pulled-item {
+  align-items: flex-start;
+  border: 1px solid var(--cloud-gray);
+  border-radius: 9px;
+  display: flex;
+  gap: 8px;
+  justify-content: space-between;
+  padding: 8px 10px;
+  background: var(--canvas-white);
+}
+
+.pulled-item-main {
+  min-width: 0;
+}
+
+.pulled-item-title {
+  color: var(--ink-solid);
+  font-size: 13px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.pulled-item-title strong {
+  color: var(--graphite-black);
+  font-weight: 700;
+}
+
+.pulled-item-meta {
+  color: var(--ash-gray);
+  font-size: 11px;
+  margin-top: 2px;
+  overflow-wrap: anywhere;
+}
+
+.btn-remove {
+  appearance: none;
+  background: transparent;
+  border: 1px solid var(--cloud-gray);
+  border-radius: 9px;
+  color: var(--subtle-gray);
+  cursor: pointer;
+  flex: 0 0 auto;
+  font-family: var(--font-body);
+  font-size: 12px;
+  font-weight: 700;
+  height: 26px;
+  line-height: 1;
+  width: 26px;
+}
+.btn-remove:hover {
+  border-color: var(--ink-solid);
+  color: var(--ink-solid);
+}
 
 .toast {
   position: fixed;

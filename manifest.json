@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Resume Medis Reviewer",
   "version": "1.0.0",
-  "description": "Side panel untuk membantu pengisian resume menggunakan AI",
+  "description": "Side panel untuk membantu review SO dan CPPT pasien dengan bantuan Gemini AI.",
   "permissions": ["sidePanel", "storage", "activeTab", "scripting"],
   "host_permissions": ["<all_urls>"],
   "action": {

@@ -8,11 +8,14 @@
   </head>
   <body>
     <header class="app-header">
-      <h1 class="app-title">Resume Medis Reviewer</h1>
+      <div class="header-top">
+        <h1 class="app-title">Resume Medis Reviewer</h1>
+        <button class="settings-button" data-tab="setting" type="button" aria-label="Buka setting">Setting</button>
+      </div>
       <nav class="tabs" role="tablist">
-        <button class="tab" data-tab="setting" role="tab">Setting</button>
         <button class="tab is-active" data-tab="so" role="tab">SO</button>
         <button class="tab" data-tab="cppt" role="tab">CPPT</button>
+        <button class="tab" data-tab="tindak-lanjut" role="tab">Tindak Lanjut</button>
       </nav>
     </header>
 
@@ -28,29 +31,37 @@
           </select>
         </label>
         <label class="field">
-          <span class="label">Gemini API Key</span>
+          <span class="label">API Key</span>
           <input id="apiKey" type="password" class="input" placeholder="AIza..." autocomplete="off" />
-          <span class="hint">Disimpan lokal di browser Anda.</span>
+          <span class="hint">API key provider utama. Disimpan lokal di browser Anda.</span>
         </label>
-        <label class="field" id="modelGeminiField">
+        <label class="field">
           <span class="label">Model</span>
-          <select id="modelGemini" class="input">
-            <option value="gemini-2.0-flash">gemini-2.0-flash</option>
-            <option value="gemini-2.5-flash">gemini-2.5-flash</option>
-            <option value="gemini-2.5-pro">gemini-2.5-pro</option>
-            <option value="__other__">Other (isi manual)</option>
-          </select>
+          <input id="model" type="text" class="input" placeholder="contoh: gemini-2.0-flash, gpt-4o-mini, dll" autocomplete="off" />
+          <span class="hint">Isi manual sesuai model provider.</span>
         </label>
-        <label class="field" id="modelCustomField" hidden>
-          <span class="label">Model</span>
-          <input id="modelCustom" type="text" class="input" placeholder="contoh: gpt-4o-mini, claude-3-5-sonnet, dll" autocomplete="off" />
-          <span class="hint">Isi sesuai daftar model yang didukung provider.</span>
-        </label>
-        <button id="saveSettings" class="btn btn-primary">Simpan</button>
+        <div id="geminiFallbackFields" class="settings-group" hidden>
+          <label class="field">
+            <span class="label">Gemini API Key Fallback</span>
+            <input id="geminiFallbackApiKey" type="password" class="input" placeholder="AIza..." autocomplete="off" />
+            <span class="hint">Dipakai jika parser lokal/provider utama gagal membaca atau merangkum PDF.</span>
+          </label>
+          <label class="field">
+            <span class="label">Model Gemini Fallback</span>
+            <input id="geminiFallbackModel" type="text" class="input" placeholder="contoh: gemini-2.0-flash" autocomplete="off" />
+          </label>
+        </div>
+        <div class="action-row">
+          <button id="validateApiKey" class="btn btn-outline">Validasi API Key</button>
+          <button id="saveSettings" class="btn btn-primary">Simpan</button>
+        </div>
+        <div id="settingsStatus" class="status" hidden></div>
       </section>
 
       <!-- SO -->
       <section class="panel is-active" data-panel="so">
+        <p class="note">Klik tombol berikut untuk mengambil data Subjektif &amp; Objektif dari IGD</p>
+        <button id="pullSO" class="btn btn-primary">Tarik data S &amp; O</button>
         <label class="field">
           <span class="label">Subjektif</span>
           <textarea id="soSubjektif" class="textarea" rows="8" placeholder="Tulis subjektif..."></textarea>
@@ -59,15 +70,16 @@
           <span class="label">Objektif</span>
           <textarea id="soObjektif" class="textarea" rows="8" placeholder="Tulis objektif..."></textarea>
         </label>
-        <button id="insertSO" class="btn btn-primary">Masukkan detail</button>
+        <button id="insertSO" class="btn btn-primary">Masukkan S &amp; O ke Resume</button>
       </section>
 
       <!-- CPPT -->
       <section class="panel" data-panel="cppt" hidden>
-        <p class="note">Pastikan sudah berada di halaman CPPT, dan show entries 100.</p>
+        <p class="note">Pastikan sudah berada di halaman CPPT Ruangan. Jumlah entries akan diatur otomatis ke 100.</p>
         <button id="aksesCPPT" class="btn btn-primary">Akses CPPT</button>
-        <button id="extractCPPT" class="btn btn-outline" disabled>Extract data CPPT</button>
+        <button id="extractCPPT" class="btn btn-outline" disabled>Proses CPPT dengan AI</button>
 
+        <div id="cpptAccessSummary" class="status cppt-summary" hidden></div>
         <div id="cpptStatus" class="status" hidden></div>
 
         <div class="results" id="cpptResults" hidden>
@@ -99,13 +111,55 @@
             <span class="label">Terapi Saat Pulang</span>
             <textarea class="textarea" rows="3" data-key="terapi_pulang"></textarea>
           </div>
-          <button id="insertCPPT" class="btn btn-primary">Masukkan Detail</button>
+          <div id="insertCPPTConfirm" class="confirm-box" hidden>
+            <span class="label">Apakah semua data sudah benar?</span>
+            <div class="confirm-actions">
+              <button id="confirmInsertCPPT" class="btn btn-primary" type="button">Ya, masukkan</button>
+              <button id="cancelInsertCPPT" class="btn btn-outline" type="button">Batal</button>
+            </div>
+          </div>
+          <button id="insertCPPT" class="btn btn-primary">Masukkan Semua Data ke Resume</button>
+        </div>
+      </section>
+
+      <!-- TINDAK LANJUT -->
+      <section class="panel" data-panel="tindak-lanjut" hidden>
+        <p id="carePeriodNote" class="note" hidden>Periode rawat : -</p>
+        <label id="cpptPenunjangField" class="field" hidden>
+          <span class="label">Pemeriksaan Penunjang bermakna dari CPPT</span>
+          <textarea id="cpptPenunjangLinked" class="textarea" rows="5" readonly></textarea>
+        </label>
+        <label class="field">
+          <span class="label">Pemeriksaan Penunjang Bermakna</span>
+          <textarea id="penunjangSummary" class="textarea textarea-long" rows="10" placeholder="Hasil rangkuman penunjang bermakna akan muncul di sini..."></textarea>
+        </label>
+
+        <div id="pullPeriodConfirm" class="confirm-box" hidden>
+          <span class="label">Tarik data sesuai periode rawat inap?</span>
+          <div class="confirm-actions">
+            <button id="pullPeriodYes" class="btn btn-primary" type="button">Ya, sesuai periode</button>
+            <button id="pullPeriodNo" class="btn btn-outline" type="button">Tidak, tarik semua</button>
+          </div>
+        </div>
+
+        <div class="action-row">
+          <button id="pullPenunjang" class="btn btn-primary">Tarik Data</button>
+          <button id="summarizePenunjang" class="btn btn-outline" disabled>Rangkum Semua Penunjang</button>
+          <button id="insertPenunjangResume" class="btn btn-primary">Masukkan ke Resume Medis</button>
+        </div>
+
+        <div id="penunjangStatus" class="status" hidden></div>
+
+        <div class="pulled-data">
+          <span class="label">Data yang ditarik</span>
+          <div id="penunjangList" class="pulled-list is-empty">Belum ada data penunjang.</div>
         </div>
       </section>
     </main>
 
     <div id="toast" class="toast" hidden></div>
 
+    <script src="vendor/pdf.min.js"></script>
     <script src="sidepanel.js"></script>
   </body>
 </html>
