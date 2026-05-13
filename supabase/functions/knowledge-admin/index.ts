@@ -16,6 +16,8 @@ type KnowledgeChunk = {
 };
 
 type AdminAiConfig = {
+  id?: string;
+  app_id?: string;
   provider: string;
   api_key: string;
   model: string;
@@ -49,6 +51,12 @@ function assertAdmin(payload: Record<string, unknown>) {
   if (payload.username !== expectedUser || payload.password !== expectedPassword) {
     throw new Error("Login admin tidak valid");
   }
+}
+
+function getAppId(payload: Record<string, unknown>) {
+  const appId = String(payload.app_id || payload.appId || "resume-medis-reviewer").trim();
+  if (!/^[a-z0-9][a-z0-9_-]{1,63}$/i.test(appId)) throw new Error("app_id tidak valid");
+  return appId;
 }
 
 async function supabaseRequest(path: string, init: RequestInit = {}) {
@@ -99,7 +107,7 @@ function buildSearchFilter(keywords: string[]) {
   return `active=eq.true&or=(${orParts.join(",")})&limit=30`;
 }
 
-function sanitizeAiConfig(config: Record<string, unknown>) {
+function sanitizeAiConfig(config: Record<string, unknown>, appId: string) {
   const provider = String(config.provider || "gemini").trim();
   const apiKey = String(config.api_key || config.apiKey || "").trim();
   const model = String(config.model || "").trim();
@@ -107,7 +115,8 @@ function sanitizeAiConfig(config: Record<string, unknown>) {
   if (!apiKey) throw new Error("API key admin wajib diisi");
   if (!model) throw new Error("Model admin wajib diisi");
   return {
-    id: "default",
+    id: appId,
+    app_id: appId,
     provider,
     api_key: apiKey,
     model,
@@ -120,6 +129,7 @@ function sanitizeAiConfig(config: Record<string, unknown>) {
 function publicAiConfig(config: AdminAiConfig | null) {
   if (!config) return null;
   return {
+    app_id: config.app_id || config.id || "resume-medis-reviewer",
     provider: config.provider,
     model: config.model,
     hasApiKey: Boolean(config.api_key),
@@ -128,8 +138,8 @@ function publicAiConfig(config: AdminAiConfig | null) {
   };
 }
 
-async function getAdminAiConfig(): Promise<AdminAiConfig | null> {
-  const rows = await supabaseRequest("admin_ai_config?select=*&id=eq.default&limit=1", {
+async function getAdminAiConfig(appId: string): Promise<AdminAiConfig | null> {
+  const rows = await supabaseRequest(`admin_ai_config?select=*&app_id=eq.${encodeURIComponent(appId)}&limit=1`, {
     method: "GET",
     headers: { Prefer: "" },
   });
@@ -196,7 +206,8 @@ async function callOpenAiCompatible(config: AdminAiConfig, payload: Record<strin
 }
 
 async function callAdminAi(payload: Record<string, unknown>) {
-  const config = await getAdminAiConfig();
+  const appId = getAppId(payload);
+  const config = await getAdminAiConfig(appId);
   if (!config?.api_key) throw new Error("API key admin belum diset");
   const text = config.provider === "gemini"
     ? await callGemini(config, payload)
@@ -228,7 +239,7 @@ Deno.serve(async (req) => {
     }
 
     if (action === "get_ai_config") {
-      const config = await getAdminAiConfig();
+      const config = await getAdminAiConfig(getAppId(payload));
       return json({ config: publicAiConfig(config) });
     }
 
@@ -240,8 +251,8 @@ Deno.serve(async (req) => {
     assertAdmin(payload);
 
     if (action === "save_ai_config") {
-      const config = sanitizeAiConfig(payload.config || {});
-      const data = await supabaseRequest("admin_ai_config?on_conflict=id", {
+      const config = sanitizeAiConfig(payload.config || {}, getAppId(payload));
+      const data = await supabaseRequest("admin_ai_config?on_conflict=app_id", {
         method: "POST",
         headers: { Prefer: "resolution=merge-duplicates,return=representation" },
         body: JSON.stringify(config),
@@ -250,7 +261,7 @@ Deno.serve(async (req) => {
     }
 
     if (action === "validate_ai_config") {
-      const config = sanitizeAiConfig(payload.config || {});
+      const config = sanitizeAiConfig(payload.config || {}, getAppId(payload));
       const text = config.provider === "gemini"
         ? await callGemini(config, { prompt: "Balas OK.", temperature: 0 })
         : await callOpenAiCompatible(config, { prompt: "Balas OK.", temperature: 0 });

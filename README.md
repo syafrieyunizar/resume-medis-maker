@@ -1,72 +1,107 @@
 # Resume Medis Reviewer
 
-Ekstensi Chrome (side panel) untuk membantu dokter mengisi **SO** dan merangkum **CPPT** menjadi 7 kolom resume medis menggunakan **Gemini AI**. Berjalan **100% lokal** — API key disimpan di browser Anda, data pasien hanya dikirim ke endpoint Gemini milik Anda sendiri.
+Ekstensi Chrome MV3 untuk membantu dokter menyusun resume medis di eRM RSUD. Repo ini sekarang berisi satu extension utama dengan dua mode kerja:
 
-## Fitur
+- `Side panel` untuk SO, CPPT, Penunjang, Analisa, Setting/Admin Knowledge BPJS.
+- `Inline improve` di halaman eRM untuk memperbaiki `anamnesis` (`textarea[name="ab"]`) dan `px fisik` (`textarea[name="ae"]`) memakai AI dengan preview terlebih dahulu.
 
-- **Tab Setting** — simpan Gemini API Key & pilih model (`gemini-2.0-flash`, `gemini-2.5-flash`, `gemini-2.5-pro`).
-- **Tab SO** — tulis Subjektif & Objektif, lalu satu klik untuk auto-input ke form EMR.
-- **Tab CPPT** — ambil tabel CPPT dari halaman aktif, ekstrak via Gemini menjadi 7 kolom:
-  1. Pemeriksaan Penunjang Bermakna
-  2. Terapi Selama Dirawat
-  3. Operasi/Tindakan
-  4. Diagnosa Utama
-  5. Diagnosa Sekunder
-  6. Konsultasi Bidang Lain
-  7. Terapi Saat Pulang
-- Hasil dapat diedit, lalu dimasukkan kembali ke form EMR dengan tombol **Masukkan Detail**.
-- Gaya output telegrafis (singkatan medis baku, koma desimal Indonesia, format lab `awal→akhir`).
+## Fitur Utama
 
-## Instalasi
+- `SO`:
+  tarik data subjektif/objektif dari IGD dan masukkan ke Resume Medis.
+- `CPPT`:
+  akses tabel CPPT, baca periode rawat, proses AI menjadi 7 field resume, lalu masukkan ke form resume.
+- `Penunjang`:
+  tarik PDF dari tombol `HASIL`, simpan tanpa duplikasi, hapus manual, rangkum menjadi penunjang bermakna, lalu masukkan ke resume.
+- `Analisa`:
+  analisa kelengkapan resume berbasis knowledge BPJS dengan output kartu risiko, temuan, bukti, dan saran kelengkapan.
+- `Setting`:
+  pilih `API key admin` atau `API key pribadi`, validasi key, dan simpan model/provider.
+- `Admin Knowledge BPJS`:
+  login admin, kelola knowledge manual/PDF chunking, dan simpan API key admin per aplikasi.
+- `Improve Inline`:
+  tombol pensil biru di samping field `ab` dan `ae`, input arahan wajib, preview hasil AI, lalu `Gunakan Hasil`.
 
-1. Buka halaman landing proyek dan klik **Download Ekstensi (.zip)**, atau ambil file langsung di `public/resume-medis-reviewer.zip`.
-2. Unzip file tersebut.
-3. Buka `chrome://extensions` di Chrome / Edge / Brave.
-4. Aktifkan **Developer mode** (pojok kanan atas).
-5. Klik **Load unpacked** dan pilih folder hasil unzip.
-6. Klik ikon ekstensi di toolbar untuk membuka side panel.
+## Struktur Repo
 
-## Setup
+```text
+manifest.json                 # Manifest MV3
+background.js                 # Service worker: side panel + AI message handler inline improve
+sidepanel.html                # UI side panel
+sidepanel.css                 # Styling side panel
+sidepanel.js                  # Logika side panel
+improve-inline.js             # Content script fitur improve anamnesis / px fisik
+improve-inline.css            # Styling content script
+vendor/
+  pdf.min.js                  # PDF.js
+  pdf.worker.min.js           # Worker PDF.js
+supabase/
+  config.toml                 # Konfigurasi function Supabase
+  functions/
+    knowledge-admin/
+      index.ts                # Edge Function untuk knowledge + admin AI config
+supabase_migration.sql        # SQL migration Supabase
+public/
+  resume-medis-reviewer.zip   # Paket extension
+design.md                     # Panduan visual
+agents.md                     # Panduan agent coding
+```
 
-1. Dapatkan API Key Gemini di <https://aistudio.google.com/app/apikey>.
-2. Buka tab **Setting** di side panel, tempel API Key, pilih model, klik **Simpan**.
-3. Buka halaman EMR pasien dan mulai gunakan tab **SO** atau **CPPT**.
+## Setup Pengguna
 
-> Untuk tab CPPT, pastikan tabel sudah menampilkan **100 entries** sebelum klik **Akses CPPT**.
+1. Buka `chrome://extensions`.
+2. Aktifkan `Developer mode`.
+3. Klik `Load unpacked` dan pilih folder repo ini, atau unzip `public/resume-medis-reviewer.zip`.
+4. Buka side panel `Resume Medis Reviewer`.
+5. Pilih sumber AI:
+   - `API key admin`: memakai konfigurasi admin dari Supabase.
+   - `API key pribadi`: memakai provider/model/key milik user.
 
-## Privasi
+## Setup Supabase
 
-- API key disimpan di `chrome.storage.local` — tidak pernah keluar dari browser Anda.
-- Data CPPT dikirim **hanya** ke `generativelanguage.googleapis.com` saat tombol **Extract data CPPT** diklik.
-- Tidak ada server pihak ketiga, tidak ada analytics, tidak ada telemetry.
+Extension ini tidak lagi 100% lokal. Knowledge dan API key admin memakai Supabase Edge Function.
+
+Yang perlu aktif:
+
+- `supabase_migration.sql` dijalankan di SQL Editor.
+- Edge Function `knowledge-admin` dideploy dari `supabase/functions/knowledge-admin/index.ts`.
+- Secret function:
+  - `SUPABASE_URL`
+  - `SUPABASE_SERVICE_ROLE_KEY`
+  - `ADMIN_USERNAME`
+  - `ADMIN_PASSWORD`
+
+`Knowledge` bersifat global. `API key admin` disimpan per `app_id`.
+
+App ID yang sudah disiapkan:
+
+- `resume-medis-reviewer`
+- `eklaim-koding-assistant`
+- `soap-gen`
+
+## Catatan Implementasi
+
+- Jalur `Gemini` bisa menerima PDF mentah.
+- Jalur `Sumopod` / `AImurah` memakai parser lokal `PDF.js` lebih dulu, lalu mengirim hasil ekstraksi ke model.
+- Progress bar pseudo dipakai untuk proses AI besar: CPPT, rangkuman penunjang, dan analisa.
+- Error parser PDF sekarang lebih informatif, termasuk nama file yang gagal dibaca.
 
 ## Pengembangan
 
-Repo berisi dua bagian:
+- Jangan lupa repackage ZIP setelah mengubah file extension:
 
-- `extension/` — source ekstensi Chrome (Manifest V3, vanilla HTML/CSS/JS).
-- `src/` — landing page (TanStack Start v1 + Vite 7 + Tailwind v4).
-
-### Repackage ekstensi setelah edit
-
-```bash
-rm -f public/resume-medis-reviewer.zip && \
-  cd extension && \
-  nix run nixpkgs#zip -- -r ../public/resume-medis-reviewer.zip .
+```powershell
+Compress-Archive -Path manifest.json,background.js,sidepanel.html,sidepanel.css,sidepanel.js,icon.png,vendor,improve-inline.js,improve-inline.css -DestinationPath public\resume-medis-reviewer.zip -Force
 ```
 
-### Jalankan landing page
+- Cek sintaks file JS utama:
 
-```bash
-bun install
-bun run dev
+```powershell
+node --check sidepanel.js
+node --check background.js
+node --check improve-inline.js
 ```
-
-## Dokumentasi Tambahan
-
-- [`design.md`](./design.md) — panduan visual & design tokens.
-- [`agents.md`](./agents.md) — panduan untuk AI coding agent yang berkontribusi ke repo.
 
 ## Lisensi
 
-Internal use. Tidak untuk distribusi publik tanpa izin.
+Internal use.

@@ -48,6 +48,67 @@ function wait(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+function createAiProgress({ panel, bar, text, status }) {
+  let percent = 0;
+  let timer = null;
+  const startedAt = Date.now();
+  const setProgress = async (message, nextPercent) => {
+    percent = Math.max(percent, nextPercent);
+    panel.hidden = false;
+    bar.className = "progress-fill";
+    bar.style.width = `${percent}%`;
+    text.textContent = message;
+    status.hidden = false;
+    status.className = "status is-loading";
+    status.textContent = message;
+    await wait(250);
+  };
+  const startWaiting = (message) => {
+    timer = setInterval(() => {
+      const elapsed = Math.floor((Date.now() - startedAt) / 1000);
+      if (percent < 92) {
+        percent += 1;
+        bar.style.width = `${percent}%`;
+      }
+      const next = `${message}... ${elapsed} detik`;
+      text.textContent = next;
+      status.textContent = `${next}. Proses 30-180 detik tergantung panjang data dan provider.`;
+    }, 1000);
+  };
+  const stop = () => {
+    if (timer) clearInterval(timer);
+    timer = null;
+  };
+  const complete = (message) => {
+    stop();
+    panel.hidden = false;
+    bar.style.width = "100%";
+    bar.className = "progress-fill is-success";
+    text.textContent = message;
+    status.hidden = false;
+    status.className = "status is-success";
+    status.textContent = message;
+  };
+  const fail = (message) => {
+    stop();
+    status.hidden = false;
+    status.className = "status is-error";
+    status.textContent = message;
+  };
+  return { setProgress, startWaiting, stop, complete, fail };
+}
+
+function getAiErrorMessage(error, context = "Proses AI") {
+  const message = String(error?.message || error || "");
+  if (/\b546\b/.test(message) || /timeout|timed out|too long/i.test(message)) {
+    return `${context} terlalu lama atau data terlalu banyak.\nRekomendasi: kurangi panjang data yang dianalisa, gunakan knowledge yang lebih spesifik, coba ulangi, atau gunakan API key pribadi/provider yang lebih cepat.`;
+  }
+  if (/PDF gagal dibaca:/i.test(message)) {
+    return `${context} gagal karena ada PDF yang tidak terbaca.\n${message}`;
+  }
+  return `${context} gagal: ${message}`;
+}
+
 function activateAdminTab(target) {
   $$(".admin-tab").forEach((tab) => {
     tab.classList.toggle("is-active", tab.dataset.adminTab === target);
@@ -289,17 +350,29 @@ async function extractPdfWithPdfJs(file) {
     pages.push({ pageNo, lines, text: lines.join("\n") });
   }
 
+  const rawText = pages.map((page) => page.lines.join("\n")).join("\n\n");
   const cleanedPages = removeRepeatedHeaderFooter(pages);
   const text = cleanedPages.map((page) => page.lines.join("\n")).join("\n\n");
-  if (text.replace(/\s+/g, "").length < 30) {
-    throw new Error("PDF tidak menghasilkan teks bermakna, kemungkinan scan/gambar");
+  const cleanedLength = text.replace(/\s+/g, "").length;
+  const rawLength = rawText.replace(/\s+/g, "").length;
+  const finalText = cleanedLength >= 30 ? text : rawLength >= 30 ? rawText : "";
+  if (!finalText) {
+    const error = new Error("PDF tidak menghasilkan teks bermakna, kemungkinan scan/gambar");
+    error.debugInfo = {
+      rawLength,
+      cleanedLength,
+      repeatedLines: [],
+    };
+    throw error;
   }
 
   return {
     pageCount: doc.numPages,
     pages: cleanedPages,
-    text,
-    structured: parsePenunjangDocument(text, file),
+    text: finalText,
+    rawText,
+    cleanedText: text,
+    structured: parsePenunjangDocument(finalText, file),
   };
 }
 
@@ -362,8 +435,10 @@ function parseLabDocument(text, file) {
     "HbA1c",
     "CRP",
     "Procalcitonin",
+    "Mikroba",
+    "Epitel",
   ];
-  const unitPattern = "(?:g\\/dl|g\\/dL|mg\\/dL|mg\\/dl|U\\/L|u\\/l|\\/ ul|\\/ul|%|fl|pg|mmol\\/L|mEq\\/L)";
+  const unitPattern = "(?:g\\/dl|g\\/dL|g\\/gl|mg\\/dL|mg\\/dl|U\\/L|u\\/l|\\/ ul|\\/ul|\\/LPB|%|fl|pg|mmol\\/L|mEq\\/L)";
   const observations = [];
 
   knownTests.forEach((test) => {
@@ -387,6 +462,28 @@ function parseLabDocument(text, file) {
     }
   });
 
+  if (!observations.length && /mikroparasitologi|pewarnaan gram|mikroba|epitel|\/lpb/i.test(text)) {
+    const microPatterns = [
+      ["Mikroba", /Mikroba\s+([^-\n]+?)(?:\s+-\s+-|\s*$)/i, ""],
+      ["Epitel", /Epitel\s+([<>]?\d+(?:[.,]\d+)?)\s+(?:\d+\s*-\s*[<>]?\d+)\s*(\/LPB)/i, null],
+      ["Leukosit", /Leukosit\s+([<>]?\d+(?:[.,]\d+)?)\s+(?:<\s*\d+|\d+\s*-\s*[<>]?\d+)?\s*(\/LPB)/i, null],
+    ];
+    microPatterns.forEach(([name, pattern, fixedUnit]) => {
+      const match = text.match(pattern);
+      if (!match) return;
+      observations.push({
+        name,
+        values: [
+          {
+            date: file.resultDate || extractDateFromText(text),
+            value: normalizeLine(match[1]),
+            unit: fixedUnit ?? normalizeLine(match[2] || "").replace(/\s+/g, ""),
+          },
+        ],
+      });
+    });
+  }
+
   const expertise = text.match(/Ekspertisi\s*:?\s*([\s\S]{0,300}?)(?:Tgl\.?\s*Hasil|Dokter Pemeriksa|$)/i)?.[1];
   return {
     type: "lab",
@@ -400,17 +497,23 @@ function parseLabDocument(text, file) {
 
 function parseRadiologyLikeDocument(text, file, type) {
   const impression =
-    text.match(/(?:Kesan|Impression|Ekspertisi|Expertise)\s*:?\s*([\s\S]{0,1800})/i)?.[1] ||
+    text.match(/(?:Kesimpulan|Kesan|Impression|Ekspertisi|Expertise)\s*:?\s*([\s\S]{0,1200})/i)?.[1] ||
+    text.match(/Hasil Pemeriksaan[\s\S]{0,1200}/i)?.[0] ||
     text.slice(0, 1800);
   const modality =
     text.match(/\b(USG|CT\s*Scan|MRI|Rontgen|Thorax|Abdomen|Echo|Ekokardiografi|EKG|ECG)[^\n:]*/i)?.[0] ||
     file.kind ||
     type;
+  const normalizedImpression = normalizeLine(impression)
+    .replace(/^Hasil Pemeriksaan\s*/i, "")
+    .replace(/^(?:Foto\s+)?/i, "")
+    .replace(/\bNo\.\s*CM\s*:.*$/i, "")
+    .trim();
   return {
     type,
     modality: normalizeLine(modality),
     date: file.resultDate || extractDateFromText(text),
-    impression: normalizeLine(impression).slice(0, 1800),
+    impression: normalizedImpression.slice(0, 1800),
     rawExcerpt: text.slice(0, 3000),
   };
 }
@@ -438,6 +541,36 @@ function compactParsedDocs(files) {
     url: file.url,
     parser: file.parsed?.structured || null,
   }));
+}
+
+function getPenunjangDisplayName(file) {
+  const parts = [file.kind, file.resultDate, file.code].filter(Boolean);
+  return parts.join(" - ") || file.name || file.url || "PDF tanpa nama";
+}
+
+async function parsePenunjangFilesWithPdfJs(files) {
+  const failures = [];
+  for (const file of files) {
+    try {
+      file.parsed = await extractPdfWithPdfJs(file);
+      if (!file.resultDate) file.resultDate = file.parsed.structured?.date || "";
+    } catch (error) {
+      failures.push({
+        file,
+        message: error instanceof Error ? error.message : String(error),
+        debugInfo: error?.debugInfo || null,
+      });
+    }
+  }
+  if (failures.length) {
+    const detail = failures
+      .map(({ file, message }) => `${getPenunjangDisplayName(file)} (${message})`)
+      .join("; ");
+    const error = new Error(`PDF gagal dibaca: ${detail}`);
+    error.failures = failures;
+    throw error;
+  }
+  return compactParsedDocs(files);
 }
 
 function parseJsonResponse(text) {
@@ -535,7 +668,7 @@ async function knowledgeApi(action, payload = {}) {
       apikey: SUPABASE_ANON_KEY,
       Authorization: `Bearer ${SUPABASE_ANON_KEY}`,
     },
-    body: JSON.stringify({ action, ...payload }),
+    body: JSON.stringify({ action, app_id: APP_ID, ...payload }),
   });
   const data = await response.json().catch(() => ({}));
   if (!response.ok || data.error) {
@@ -543,6 +676,9 @@ async function knowledgeApi(action, payload = {}) {
       throw new Error(
         "Supabase menolak akses Edge Function. Pastikan function knowledge-admin sudah deploy dan secret/service role sudah diset."
       );
+    }
+    if (response.status === 546) {
+      throw new Error("Knowledge API 546: proses terlalu lama atau payload terlalu besar");
     }
     throw new Error(data.error || `Knowledge API ${response.status}`);
   }
@@ -777,6 +913,62 @@ function extractClaimKeywords(resume) {
   return Array.from(new Set([...found, ...dxWords])).slice(0, 20);
 }
 
+function truncateText(value, maxLength) {
+  const text = String(value || "").replace(/\s+/g, " ").trim();
+  if (text.length <= maxLength) return text;
+  return text.slice(0, maxLength).trim() + " ...[dipotong]";
+}
+
+function compactObject(value) {
+  if (Array.isArray(value)) return value.map(compactObject).filter((item) => item !== "" && item != null);
+  if (!value || typeof value !== "object") return value;
+  return Object.fromEntries(
+    Object.entries(value)
+      .map(([key, item]) => [key, compactObject(item)])
+      .filter(([, item]) => {
+        if (item == null) return false;
+        if (typeof item === "string") return item.trim() !== "";
+        if (Array.isArray(item)) return item.length > 0;
+        if (typeof item === "object") return Object.keys(item).length > 0;
+        return true;
+      })
+  );
+}
+
+function compactResumeForClaim(resume, compact = false) {
+  const limits = compact
+    ? { subjektif: 1200, objektif: 1200, penunjang: 1400, penunjang_tindak_lanjut: 1800, other: 900 }
+    : { subjektif: 2000, objektif: 2000, penunjang: 2200, penunjang_tindak_lanjut: 3000, other: 1400 };
+  return compactObject({
+    periode_rawat: resume.periode_rawat,
+    subjektif: truncateText(resume.subjektif, limits.subjektif),
+    objektif: truncateText(resume.objektif, limits.objektif),
+    cppt: {
+      penunjang: truncateText(resume.cppt?.penunjang, limits.penunjang),
+      terapi_dirawat: truncateText(resume.cppt?.terapi_dirawat, limits.other),
+      operasi: truncateText(resume.cppt?.operasi, limits.other),
+      dx_utama: truncateText(resume.cppt?.dx_utama, limits.other),
+      dx_sekunder: truncateText(resume.cppt?.dx_sekunder, limits.other),
+      konsul: truncateText(resume.cppt?.konsul, limits.other),
+      terapi_pulang: truncateText(resume.cppt?.terapi_pulang, limits.other),
+    },
+    penunjang_dari_cppt: truncateText(resume.penunjang_dari_cppt, limits.penunjang),
+    penunjang_tindak_lanjut: truncateText(resume.penunjang_tindak_lanjut, limits.penunjang_tindak_lanjut),
+  });
+}
+
+function compactKnowledgeChunks(chunks, compact = false) {
+  const contentLimit = compact ? 700 : 1100;
+  return chunks.map((chunk) => ({
+    title: truncateText(chunk.title, 140),
+    category: truncateText(chunk.category, 80),
+    source_name: truncateText(chunk.source_name, 120),
+    source_page: chunk.source_page ?? null,
+    keywords: Array.isArray(chunk.keywords) ? chunk.keywords.slice(0, 8) : [],
+    content: truncateText(chunk.content, contentLimit),
+  }));
+}
+
 function formatClaimAnalysisPrompt(resume, chunks) {
   return `Kamu adalah seorang dokter casemix. Analisa kelengkapan dokumentasi resume medis agar risiko pending klaim BPJS lebih kecil.
 
@@ -811,7 +1003,7 @@ RESUME:
 ${JSON.stringify(resume, null, 2)}
 
 KNOWLEDGE RELEVAN:
-${JSON.stringify(chunks.slice(0, 15), null, 2)}`;
+${JSON.stringify(chunks, null, 2)}`;
 }
 
 async function callProviderText({ provider, apiKey, model, prompt }) {
@@ -844,6 +1036,7 @@ async function callProviderText({ provider, apiKey, model, prompt }) {
       model,
       messages: [{ role: "user", content: prompt }],
       temperature: 0.2,
+      response_format: { type: "json_object" },
     }),
   });
   if (!res.ok) throw new Error("API " + res.status + ": " + (await res.text()).slice(0, 200));
@@ -1076,6 +1269,7 @@ const PROVIDERS = {
 
 const KNOWLEDGE_FUNCTION_URL =
   "https://yvcqgwpfjoxhuyhxuiry.supabase.co/functions/v1/knowledge-admin";
+const APP_ID = "resume-medis-reviewer";
 const SUPABASE_ANON_KEY =
   "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inl2Y3Fnd3Bmam94aHV5aHh1aXJ5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzg0NzkxOTIsImV4cCI6MjA5NDA1NTE5Mn0.cSVjIjIpC9hlm8Sb5nISxUitoRHtEL0pC6ZphQ9SxLw";
 
@@ -1724,6 +1918,12 @@ extractBtn.addEventListener("click", async () => {
   }
 
   const status = $("#cpptStatus");
+  const progress = createAiProgress({
+    panel: $("#cpptProgress"),
+    bar: $("#cpptProgressBar"),
+    text: $("#cpptProgressText"),
+    status,
+  });
   status.hidden = false;
   status.className = "status is-loading";
   extractBtn.disabled = true;
@@ -1773,14 +1973,20 @@ Berikan output untuk: Pemeriksaan Penunjang Bermakna, Terapi Selama Dirawat, Ope
   };
 
   try {
+    await progress.setProgress("Menyiapkan CPPT...", 10);
     const ai = await getEffectiveAiSettings();
-    status.textContent = `Memproses dengan ${ai.source === "admin" ? "API key admin" : PROVIDERS[ai.provider]?.label || ai.provider}...`;
+    await progress.setProgress(
+      `Memproses dengan ${ai.source === "admin" ? "API key admin" : PROVIDERS[ai.provider]?.label || ai.provider}...`,
+      25
+    );
     const userMsg =
       "Data CPPT:\n\n" +
       state.cpptText +
       "\n\nKembalikan JSON object dengan key PERSIS berikut: penunjang, terapi_dirawat, operasi, dx_utama, dx_sekunder, konsul, terapi_pulang. Jangan gunakan key lain. Setiap field berisi ringkasan singkat, padat, detail bermakna. Jika tidak ada data, isi dengan '-'.";
 
     let text;
+    await progress.setProgress("Menghubungi AI untuk memproses CPPT...", 45);
+    progress.startWaiting("Menunggu respons AI CPPT");
     if (ai.source === "admin") {
       text = await callAdminAiText({
         systemPrompt,
@@ -1840,7 +2046,9 @@ Berikan output untuk: Pemeriksaan Penunjang Bermakna, Terapi Selama Dirawat, Ope
       const data = await res.json();
       text = data?.choices?.[0]?.message?.content;
     }
+    progress.stop();
     if (!text) throw new Error("Respons kosong dari provider");
+    await progress.setProgress("Menyusun hasil CPPT...", 94);
     const parsed = parseJsonResponse(text);
     const normalized = normalizeCpptResult(parsed);
 
@@ -1853,19 +2061,16 @@ Berikan output untuk: Pemeriksaan Penunjang Bermakna, Terapi Selama Dirawat, Ope
     if (!hasMeaningfulCpptResult(normalized)) {
       updateCpptPenunjangLinked("");
       const keys = Object.keys(parsed || {}).join(", ") || "tidak ada key";
-      status.className = "status is-error";
-      status.textContent = `Provider merespons sukses, tetapi 7 field kosong/tidak cocok. Key respons: ${keys}`;
+      progress.fail(`Provider merespons sukses, tetapi 7 field kosong/tidak cocok. Key respons: ${keys}`);
       toast("Hasil extract kosong", "error");
     } else {
       const filled = Object.values(normalized).filter((value) => String(value || "").trim()).length;
-      status.className = "status";
-      status.textContent = `Selesai. ${filled}/7 field terisi dan dapat diedit di bawah.`;
+      progress.complete(`Selesai. ${filled}/7 field terisi dan dapat diedit di bawah.`);
       toast("Ekstraksi selesai", "success");
     }
   } catch (e) {
     console.error(e);
-    status.className = "status is-error";
-    status.textContent = "Gagal: " + e.message;
+    progress.fail(getAiErrorMessage(e, "Proses CPPT dengan AI"));
     toast("Gagal extract", "error");
   } finally {
     extractBtn.disabled = false;
@@ -1907,8 +2112,12 @@ async function pullPenunjangData({ filterByPeriod }) {
     const [{ result }] = await chrome.scripting.executeScript({
       target: { tabId: tab.id },
       func: async () => {
-        const labels = Array.from(document.querySelectorAll("label.btn-xs.btn-success"))
-          .filter((el) => (el.textContent || "").trim().toUpperCase() === "HASIL");
+        const wrapper = document.querySelector("#DataTables_Table_1_wrapper");
+        const table = wrapper?.querySelector?.("table");
+        const bodyRows = Array.from(table?.querySelectorAll?.("tbody tr") || []).filter((row) => {
+          const style = window.getComputedStyle(row);
+          return style.display !== "none" && style.visibility !== "hidden";
+        });
 
         const asUrl = (value) => {
           if (!value || /^javascript:/i.test(value)) return "";
@@ -1954,9 +2163,12 @@ async function pullPenunjangData({ filterByPeriod }) {
         };
 
         const rows = [];
-        for (let i = 0; i < labels.length; i += 1) {
-          const label = labels[i];
-          const tr = label.closest("tr");
+        for (let i = 0; i < bodyRows.length; i += 1) {
+          const tr = bodyRows[i];
+          const label = Array.from(tr.querySelectorAll("label.btn-xs.btn-success")).find(
+            (el) => (el.textContent || "").trim().toUpperCase() === "HASIL"
+          );
+          if (!label) continue;
           const cells = Array.from(tr?.querySelectorAll?.("td") || []).map((td) =>
             (td.innerText || td.textContent || "").replace(/\s+/g, " ").trim()
           );
@@ -1979,7 +2191,7 @@ async function pullPenunjangData({ filterByPeriod }) {
 
           rows.push({ ok: true, name, url, code, resultDate, kind });
         }
-        return { total: labels.length, rows };
+        return { total: bodyRows.length, rows };
       },
     });
 
@@ -2046,6 +2258,12 @@ async function pullPenunjangData({ filterByPeriod }) {
 // ---------------- Tindak Lanjut: Rangkum penunjang PDF ----------------
 summarizePenunjangBtn.addEventListener("click", async () => {
   const status = $("#penunjangStatus");
+  const progress = createAiProgress({
+    panel: $("#penunjangProgress"),
+    bar: $("#penunjangProgressBar"),
+    text: $("#penunjangProgressText"),
+    status,
+  });
 
   if (!state.penunjangFiles.length) {
     toast("Tarik data penunjang terlebih dahulu", "error");
@@ -2054,73 +2272,73 @@ summarizePenunjangBtn.addEventListener("click", async () => {
 
   status.hidden = false;
   status.className = "status is-loading";
-  status.textContent = `Memproses ${state.penunjangFiles.length} data penunjang...`;
   summarizePenunjangBtn.disabled = true;
 
   try {
+    await progress.setProgress(`Memproses ${state.penunjangFiles.length} data penunjang...`, 10);
     const ai = await getEffectiveAiSettings();
+    await progress.setProgress("Menyiapkan data penunjang...", 22);
     let summary = "";
 
     if (ai.source === "admin") {
-      status.textContent = "Mencoba parser lokal PDF.js untuk API key admin...";
-      for (const file of state.penunjangFiles) {
-        file.parsed = await extractPdfWithPdfJs(file);
-        if (!file.resultDate) file.resultDate = file.parsed.structured?.date || "";
-      }
-      const parsedDocs = compactParsedDocs(state.penunjangFiles);
-      status.textContent = "Merangkum dengan API key admin...";
+      await progress.setProgress("Mencoba parser lokal PDF.js untuk API key admin...", 35);
+      const parsedDocs = await parsePenunjangFilesWithPdfJs(state.penunjangFiles);
+      await progress.setProgress("Merangkum dengan API key admin...", 60);
+      progress.startWaiting("Menunggu respons AI penunjang");
       summary = await callAdminAiText({
         systemPrompt: penunjangSystemPrompt,
         userPrompt:
           "Rangkum pemeriksaan penunjang bermakna dari hasil ekstraksi PDF berikut:\n\n" +
           JSON.stringify(parsedDocs),
       });
+      progress.stop();
     } else if (ai.provider === "gemini") {
-      status.textContent = "Merangkum PDF langsung dengan Gemini...";
+      await progress.setProgress("Merangkum PDF langsung dengan Gemini...", 50);
+      progress.startWaiting("Menunggu respons AI penunjang");
       summary = await callGeminiForPenunjangPdf({
         apiKey: ai.apiKey,
         model: ai.model,
         files: state.penunjangFiles,
       });
+      progress.stop();
     } else {
       try {
-        status.textContent = "Mencoba parser lokal PDF.js...";
-        for (const file of state.penunjangFiles) {
-          file.parsed = await extractPdfWithPdfJs(file);
-          if (!file.resultDate) file.resultDate = file.parsed.structured?.date || "";
-        }
-
-        const parsedDocs = compactParsedDocs(state.penunjangFiles);
-        status.textContent = `PDF berhasil diekstrak. Merangkum dengan ${PROVIDERS[ai.provider]?.label || ai.provider}...`;
+        await progress.setProgress("Mencoba parser lokal PDF.js...", 35);
+        const parsedDocs = await parsePenunjangFilesWithPdfJs(state.penunjangFiles);
+        await progress.setProgress(`PDF berhasil diekstrak. Merangkum dengan ${PROVIDERS[ai.provider]?.label || ai.provider}...`, 60);
+        progress.startWaiting("Menunggu respons AI penunjang");
         summary = await callOpenAiCompatibleForPenunjang({
           provider: ai.provider,
           apiKey: ai.apiKey,
           model: ai.model,
           parsedDocs,
         });
+        progress.stop();
       } catch (primaryError) {
+        progress.stop();
         if (!ai.geminiFallbackApiKey) {
           throw new Error(
             `${PROVIDERS[ai.provider]?.label || ai.provider}/parser gagal: ${primaryError.message}. Gemini API fallback belum diisi.`
           );
         }
-        status.textContent = `Gagal menggunakan ${PROVIDERS[ai.provider]?.label || ai.provider}/parser: ${primaryError.message}. Melanjutkan dengan Gemini API fallback...`;
+        await progress.setProgress(`Gagal menggunakan ${PROVIDERS[ai.provider]?.label || ai.provider}/parser. Melanjutkan dengan Gemini API fallback...`, 68);
+        progress.startWaiting("Menunggu respons Gemini fallback");
         summary = await callGeminiForPenunjangPdf({
           apiKey: ai.geminiFallbackApiKey,
           model: ai.geminiFallbackModel,
           files: state.penunjangFiles,
         });
+        progress.stop();
       }
     }
 
+    await progress.setProgress("Menyusun rangkuman penunjang...", 94);
     $("#penunjangSummary").value = summary || "";
-    status.className = "status";
-    status.textContent = "Selesai. Rangkuman dapat diedit di field Pemeriksaan Penunjang Bermakna.";
+    progress.complete("Selesai. Rangkuman dapat diedit di field Pemeriksaan Penunjang Bermakna.");
     toast("Rangkuman penunjang selesai", "success");
   } catch (e) {
     console.error(e);
-    status.className = "status is-error";
-    status.textContent = "Gagal: " + e.message;
+    progress.fail(getAiErrorMessage(e, "Rangkuman penunjang"));
     toast("Gagal merangkum", "error");
   } finally {
     summarizePenunjangBtn.disabled = state.penunjangFiles.length === 0;
@@ -2227,48 +2445,39 @@ $("#analyzeClaimBpjs").addEventListener("click", async () => {
   const progressText = $("#claimProgressText");
   const result = $("#claimAnalysisResult");
   const button = $("#analyzeClaimBpjs");
-  let percent = 0;
-  let timer = null;
-  const startedAt = Date.now();
-  const setProgress = async (message, nextPercent) => {
-    percent = Math.max(percent, nextPercent);
-    progress.hidden = false;
-    progressBar.className = "progress-fill";
-    progressBar.style.width = `${percent}%`;
-    progressText.textContent = message;
-    status.hidden = false;
-    status.className = "status is-loading";
-    status.textContent = message;
-    await wait(250);
-  };
+  const progressCtl = createAiProgress({
+    panel: progress,
+    bar: progressBar,
+    text: progressText,
+    status,
+  });
   button.disabled = true;
   result.hidden = true;
   result.textContent = "";
 
   try {
-    await setProgress("Membaca form extension...", 8);
+    await progressCtl.setProgress("Membaca form extension...", 8);
     const resume = collectResumeForClaimAnalysis();
-    await setProgress("Memeriksa Subjektif...", 18);
-    await setProgress("Memeriksa Objektif...", 28);
-    await setProgress("Memeriksa Rangkuman CPPT...", 42);
-    await setProgress("Memeriksa Penunjang...", 55);
-    await setProgress("Memeriksa Knowledge...", 68);
+    await progressCtl.setProgress("Memeriksa Subjektif...", 18);
+    await progressCtl.setProgress("Memeriksa Objektif...", 28);
+    await progressCtl.setProgress("Memeriksa Rangkuman CPPT...", 42);
+    await progressCtl.setProgress("Memeriksa Penunjang...", 55);
+    await progressCtl.setProgress("Memeriksa Knowledge...", 68);
     const keywords = extractClaimKeywords(resume);
     const knowledge = await knowledgeApi("search", { keywords });
-    const chunks = (knowledge.chunks || []).slice(0, 15);
+    const chunks = (knowledge.chunks || []).slice(0, 8);
+    let compactResume = compactResumeForClaim(resume, false);
+    let compactChunks = compactKnowledgeChunks(chunks, false);
+    let prompt = formatClaimAnalysisPrompt(compactResume, compactChunks);
+    if (prompt.length > 14000) {
+      await progressCtl.setProgress("Data analisa besar. Menggunakan mode ringkas otomatis...", 72);
+      compactResume = compactResumeForClaim(resume, true);
+      compactChunks = compactKnowledgeChunks(chunks.slice(0, 5), true);
+      prompt = formatClaimAnalysisPrompt(compactResume, compactChunks);
+    }
 
-    await setProgress(`Proses Analisa dengan AI memakai ${chunks.length} knowledge relevan...`, 78);
-    timer = setInterval(() => {
-      const elapsed = Math.floor((Date.now() - startedAt) / 1000);
-      if (percent < 92) {
-        percent += 1;
-        progressBar.style.width = `${percent}%`;
-      }
-      const message = `Proses Analisa dengan AI... ${elapsed} detik`;
-      progressText.textContent = message;
-      status.textContent = message + ". Biasanya 20-90 detik tergantung panjang resume dan provider.";
-    }, 1000);
-    const prompt = formatClaimAnalysisPrompt(resume, chunks);
+    await progressCtl.setProgress(`Proses Analisa dengan AI memakai ${compactChunks.length} knowledge relevan...`, 78);
+    progressCtl.startWaiting("Proses Analisa dengan AI");
     const ai = await getEffectiveAiSettings();
     const analysis =
       ai.source === "admin"
@@ -2276,22 +2485,15 @@ $("#analyzeClaimBpjs").addEventListener("click", async () => {
         : await callProviderText({ provider: ai.provider, apiKey: ai.apiKey, model: ai.model, prompt });
     if (!analysis.trim()) throw new Error("Respons analisa kosong dari provider");
 
-    clearInterval(timer);
-    timer = null;
-    await setProgress("Hampir selesai...", 96);
+    progressCtl.stop();
+    await progressCtl.setProgress("Hampir selesai...", 96);
     const parsed = parseJsonResponse(analysis);
     renderClaimAnalysis(parsed);
-    progressBar.style.width = "100%";
-    progressBar.className = "progress-fill is-success";
-    progressText.textContent = "Analisa telah selesai.";
-    status.className = "status is-success";
-    status.textContent = "Analisa telah selesai.";
+    progressCtl.complete("Analisa telah selesai.");
     toast("Analisa klaim selesai", "success");
   } catch (e) {
-    if (timer) clearInterval(timer);
     console.error(e);
-    status.className = "status is-error";
-    status.textContent = "Gagal analisa klaim: " + e.message;
+    progressCtl.fail(getAiErrorMessage(e, "Analisa klaim"));
     toast("Gagal analisa klaim", "error");
   } finally {
     button.disabled = false;
