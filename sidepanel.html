@@ -32,34 +32,36 @@
           </select>
           <span class="hint">Jika memilih admin atau data pribadi kosong, extension memakai API key admin.</span>
         </label>
-        <label class="field">
-          <span class="label">Provider</span>
-          <select id="provider" class="input">
-            <option value="gemini">Gemini (Google)</option>
-            <option value="sumopod">Sumopod</option>
-            <option value="aimurah">AImurah</option>
-          </select>
-        </label>
-        <label class="field">
-          <span class="label">API Key</span>
-          <input id="apiKey" type="password" class="input" placeholder="AIza..." autocomplete="off" />
-          <span class="hint">API key provider utama. Disimpan lokal di browser Anda.</span>
-        </label>
-        <label class="field">
-          <span class="label">Model</span>
-          <input id="model" type="text" class="input" placeholder="contoh: gemini-2.0-flash, gpt-4o-mini, dll" autocomplete="off" />
-          <span class="hint">Isi manual sesuai model provider.</span>
-        </label>
-        <div id="geminiFallbackFields" class="settings-group" hidden>
+        <div id="personalApiSettings" class="settings-group settings-group-personal">
           <label class="field">
-            <span class="label">Gemini API Key Fallback</span>
-            <input id="geminiFallbackApiKey" type="password" class="input" placeholder="AIza..." autocomplete="off" />
-            <span class="hint">Dipakai jika parser lokal/provider utama gagal membaca atau merangkum PDF.</span>
+            <span class="label">Provider</span>
+            <select id="provider" class="input">
+              <option value="gemini">Gemini (Google)</option>
+              <option value="sumopod">Sumopod</option>
+              <option value="aimurah">AImurah</option>
+            </select>
           </label>
           <label class="field">
-            <span class="label">Model Gemini Fallback</span>
-            <input id="geminiFallbackModel" type="text" class="input" placeholder="contoh: gemini-2.0-flash" autocomplete="off" />
+            <span class="label">API Key</span>
+            <input id="apiKey" type="password" class="input" placeholder="AIza..." autocomplete="off" />
+            <span class="hint">API key provider utama. Disimpan lokal di browser Anda.</span>
           </label>
+          <label class="field">
+            <span class="label">Model</span>
+            <input id="model" type="text" class="input" placeholder="contoh: gemini-2.0-flash, gpt-4o-mini, dll" autocomplete="off" />
+            <span class="hint">Isi manual sesuai model provider.</span>
+          </label>
+          <div id="geminiFallbackFields" class="settings-group" hidden>
+            <label class="field">
+              <span class="label">Gemini API Key Fallback</span>
+              <input id="geminiFallbackApiKey" type="password" class="input" placeholder="AIza..." autocomplete="off" />
+              <span class="hint">Dipakai jika parser lokal/provider utama gagal membaca atau merangkum PDF.</span>
+            </label>
+            <label class="field">
+              <span class="label">Model Gemini Fallback</span>
+              <input id="geminiFallbackModel" type="text" class="input" placeholder="contoh: gemini-2.0-flash" autocomplete="off" />
+            </label>
+          </div>
         </div>
         <div class="action-row">
           <button id="validateApiKey" class="btn btn-outline">Validasi API Key</button>
@@ -101,8 +103,21 @@
                 <option value="gemini">Gemini (Google)</option>
                 <option value="sumopod">Sumopod</option>
                 <option value="aimurah">AImurah</option>
+                <option value="custom">Provider Lain</option>
               </select>
             </label>
+            <div id="adminCustomProviderFields" class="settings-group" hidden>
+              <label class="field">
+                <span class="label">Nama Provider</span>
+                <input id="adminProviderLabel" type="text" class="input" placeholder="contoh: Genifty" autocomplete="off" />
+                <span class="hint">Nama ini akan tampil di dropdown provider admin untuk aplikasi ini.</span>
+              </label>
+              <label class="field">
+                <span class="label">Endpoint URL</span>
+                <input id="adminBaseUrl" type="text" class="input" placeholder="https://api.provider.com/v1/chat/completions" autocomplete="off" />
+                <span class="hint">Gunakan endpoint OpenAI-compatible chat/completions.</span>
+              </label>
+            </div>
             <label class="field">
               <span class="label">API Key Admin</span>
               <input id="adminApiKey" type="password" class="input" placeholder="API key admin" autocomplete="off" />

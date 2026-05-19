@@ -18,6 +18,8 @@ create table if not exists public.admin_ai_config (
   id text primary key default 'default',
   app_id text,
   provider text not null default 'gemini',
+  provider_label text,
+  base_url text,
   api_key text not null default '',
   model text not null default 'gemini-2.0-flash',
   gemini_fallback_api_key text,
@@ -27,6 +29,12 @@ create table if not exists public.admin_ai_config (
 
 alter table public.admin_ai_config
 add column if not exists app_id text;
+
+alter table public.admin_ai_config
+add column if not exists provider_label text;
+
+alter table public.admin_ai_config
+add column if not exists base_url text;
 
 alter table public.admin_ai_config
 alter column api_key set default '';

@@ -19,6 +19,8 @@ type AdminAiConfig = {
   id?: string;
   app_id?: string;
   provider: string;
+  provider_label?: string | null;
+  base_url?: string | null;
   api_key: string;
   model: string;
   gemini_fallback_api_key?: string | null;
@@ -109,15 +111,24 @@ function buildSearchFilter(keywords: string[]) {
 
 function sanitizeAiConfig(config: Record<string, unknown>, appId: string) {
   const provider = String(config.provider || "gemini").trim();
+  const providerLabel = String(config.provider_label || config.providerLabel || "").trim();
+  const baseUrl = String(config.base_url || config.baseUrl || "").trim();
   const apiKey = String(config.api_key || config.apiKey || "").trim();
   const model = String(config.model || "").trim();
-  if (!["gemini", "sumopod", "aimurah"].includes(provider)) throw new Error("Provider admin tidak dikenal");
+  if (!["gemini", "sumopod", "aimurah", "custom"].includes(provider)) throw new Error("Provider admin tidak dikenal");
+  if (provider === "custom") {
+    if (!providerLabel) throw new Error("Nama provider custom wajib diisi");
+    if (!baseUrl) throw new Error("Endpoint provider custom wajib diisi");
+    if (!/^https?:\/\//i.test(baseUrl)) throw new Error("Endpoint provider custom harus berupa URL http/https");
+  }
   if (!apiKey) throw new Error("API key admin wajib diisi");
   if (!model) throw new Error("Model admin wajib diisi");
   return {
     id: appId,
     app_id: appId,
     provider,
+    provider_label: provider === "custom" ? providerLabel : null,
+    base_url: provider === "custom" ? baseUrl : null,
     api_key: apiKey,
     model,
     gemini_fallback_api_key: String(config.gemini_fallback_api_key || config.geminiFallbackApiKey || "").trim() || null,
@@ -131,6 +142,8 @@ function publicAiConfig(config: AdminAiConfig | null) {
   return {
     app_id: config.app_id || config.id || "resume-medis-reviewer",
     provider: config.provider,
+    providerLabel: config.provider_label || null,
+    baseUrl: config.base_url || null,
     model: config.model,
     hasApiKey: Boolean(config.api_key),
     hasGeminiFallback: Boolean(config.gemini_fallback_api_key),
@@ -181,7 +194,7 @@ async function callOpenAiCompatible(config: AdminAiConfig, payload: Record<strin
     sumopod: "https://ai.sumopod.com/v1/chat/completions",
     aimurah: "https://aimurah.my.id/api/v1/chat/completions",
   };
-  const endpoint = endpoints[config.provider];
+  const endpoint = config.provider === "custom" ? String(config.base_url || "").trim() : endpoints[config.provider];
   if (!endpoint) throw new Error("Provider admin tidak mendukung format OpenAI-compatible");
   const messages = [];
   if (payload.systemPrompt) messages.push({ role: "system", content: String(payload.systemPrompt) });

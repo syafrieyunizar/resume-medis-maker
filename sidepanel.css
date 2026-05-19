@@ -125,7 +125,17 @@ body.is-admin-mode .settings-button {
   border-top: 1px solid var(--cloud-gray);
   padding-top: 12px;
 }
+.settings-group-personal {
+  border-top: none;
+  padding-top: 0;
+}
 .settings-group[hidden] { display: none; }
+.settings-main.is-admin-source #personalApiSettings {
+  display: none;
+}
+.settings-main.is-admin-source #validateApiKey {
+  display: none;
+}
 .admin-panel {
   display: flex;
   flex-direction: column;

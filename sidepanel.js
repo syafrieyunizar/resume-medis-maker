@@ -1172,6 +1172,19 @@ function formatDateId(date) {
   return `${dd}/${mm}/${yyyy}`;
 }
 
+function adjustCarePeriodStart(date) {
+  if (!(date instanceof Date) || Number.isNaN(date.getTime())) return date;
+  const hours = date.getHours();
+  const minutes = date.getMinutes();
+  if (hours < 0 || hours > 2) return date;
+  if (hours === 0 && minutes === 0) return date;
+  if (hours === 2 && minutes > 0) return date;
+  const adjusted = new Date(date.getTime());
+  adjusted.setDate(adjusted.getDate() - 1);
+  adjusted.setHours(0, 0, 0, 0);
+  return adjusted;
+}
+
 function summarizeCpptText(text) {
   const lines = text
     .split(/\r?\n/)
@@ -1207,7 +1220,7 @@ function summarizeCpptTable(tableData, fallbackText = "") {
     .map(parseFlexibleDate)
     .filter((date) => date && !Number.isNaN(date.getTime()))
     .sort((a, b) => a.getTime() - b.getTime());
-  const startDate = parsedDates[0] || null;
+  const startDate = parsedDates[0] ? adjustCarePeriodStart(parsedDates[0]) : null;
   const endDate = parsedDates[parsedDates.length - 1] || null;
   const periodText =
     startDate && endDate ? `${formatDateId(startDate)} - ${formatDateId(endDate)}` : "-";
@@ -1266,6 +1279,23 @@ const PROVIDERS = {
   sumopod: { label: "Sumopod", url: "https://ai.sumopod.com/v1/chat/completions" },
   aimurah: { label: "AImurah", url: "https://aimurah.my.id/api/v1/chat/completions" },
 };
+
+function getProviderLabel(provider, customLabel = "") {
+  if (provider === "custom") return customLabel || "Provider Lain";
+  return PROVIDERS[provider]?.label || provider || "Provider";
+}
+
+function upsertAdminProviderOption(label = "Provider Lain") {
+  const select = $("#adminProvider");
+  if (!select) return;
+  let option = select.querySelector('option[value="custom"]');
+  if (!option) {
+    option = document.createElement("option");
+    option.value = "custom";
+    select.append(option);
+  }
+  option.textContent = label;
+}
 
 const KNOWLEDGE_FUNCTION_URL =
   "https://yvcqgwpfjoxhuyhxuiry.supabase.co/functions/v1/knowledge-admin";
@@ -1421,8 +1451,7 @@ function syncSettingsFields(provider, modelValue) {
   // update API key label text
   const apiKeyField = $("#apiKey").closest(".field");
   if (apiKeyField) {
-    apiKeyField.querySelector(".label").textContent =
-      (isGemini ? "Gemini" : PROVIDERS[provider]?.label || "Provider") + " API Key";
+    apiKeyField.querySelector(".label").textContent = getProviderLabel(provider) + " API Key";
   }
   if (fallbackFields) fallbackFields.hidden = isGemini;
   if (modelInput) modelInput.value = modelValue || (isGemini ? "gemini-2.0-flash" : "");
@@ -1430,6 +1459,9 @@ function syncSettingsFields(provider, modelValue) {
 
 function syncApiKeySourceFields() {
   const useAdmin = $("#apiKeySource").value === "admin";
+  $("#settingsMain")?.classList.toggle("is-admin-source", useAdmin);
+  const personalGroup = $("#personalApiSettings");
+  if (personalGroup) personalGroup.hidden = useAdmin;
   ["provider", "apiKey", "model", "geminiFallbackApiKey", "geminiFallbackModel", "validateApiKey"].forEach((id) => {
     const el = $("#" + id);
     if (el) el.disabled = useAdmin;
@@ -1439,9 +1471,13 @@ function syncApiKeySourceFields() {
 function syncAdminSettingsFields(provider, modelValue) {
   const isGemini = provider === "gemini";
   const fallbackFields = $("#adminGeminiFallbackFields");
+  const customFields = $("#adminCustomProviderFields");
   if (fallbackFields) fallbackFields.hidden = isGemini;
+  if (customFields) customFields.hidden = provider !== "custom";
   if ($("#adminModel")) $("#adminModel").value = modelValue || (isGemini ? "gemini-2.0-flash" : "");
 }
+
+upsertAdminProviderOption("Provider Lain");
 
 async function loadSettings() {
   const {
@@ -1477,6 +1513,11 @@ $("#apiKeySource").addEventListener("change", syncApiKeySourceFields);
 
 $("#adminProvider").addEventListener("change", () => {
   syncAdminSettingsFields($("#adminProvider").value, $("#adminModel").value.trim());
+});
+
+$("#adminProviderLabel").addEventListener("input", () => {
+  if ($("#adminProvider").value !== "custom") return;
+  upsertAdminProviderOption($("#adminProviderLabel").value.trim() || "Provider Lain");
 });
 
 function getCurrentModel() {
@@ -1571,6 +1612,8 @@ async function loadKnowledgeList() {
 function collectAdminAiForm() {
   return {
     provider: $("#adminProvider").value,
+    provider_label: $("#adminProviderLabel").value.trim(),
+    base_url: $("#adminBaseUrl").value.trim(),
     api_key: $("#adminApiKey").value.trim(),
     model: $("#adminModel").value.trim(),
     gemini_fallback_api_key: $("#adminGeminiFallbackApiKey").value.trim(),
@@ -1582,10 +1625,14 @@ async function loadAdminAiConfig() {
   const data = await knowledgeApi("get_ai_config");
   const config = data.config;
   if (!config) {
+    upsertAdminProviderOption("Provider Lain");
     syncAdminSettingsFields($("#adminProvider").value, $("#adminModel").value.trim());
     return;
   }
+  upsertAdminProviderOption(config.provider === "custom" ? config.providerLabel || "Provider Lain" : "Provider Lain");
   $("#adminProvider").value = config.provider || "gemini";
+  $("#adminProviderLabel").value = config.providerLabel || "";
+  $("#adminBaseUrl").value = config.baseUrl || "";
   $("#adminModel").value = config.model || "gemini-2.0-flash";
   $("#adminApiKey").value = "";
   $("#adminGeminiFallbackApiKey").value = "";
@@ -1614,16 +1661,17 @@ $("#knowledgeLogin").addEventListener("click", async () => {
 
 $("#validateAdminApiKey").addEventListener("click", async () => {
   const status = $("#knowledgeStatus");
+  const config = collectAdminAiForm();
   status.hidden = false;
   status.className = "status is-loading";
-  status.textContent = "Memvalidasi API key admin...";
+  status.textContent = `Memvalidasi ${getProviderLabel(config.provider, config.provider_label)}...`;
   try {
     await knowledgeApi("validate_ai_config", {
       ...getKnowledgeAuth(),
-      config: collectAdminAiForm(),
+      config,
     });
     status.className = "status is-success";
-    status.textContent = "API key admin aktif.";
+    status.textContent = `${getProviderLabel(config.provider, config.provider_label)} aktif.`;
     toast("API key admin aktif", "success");
   } catch (e) {
     status.className = "status is-error";
@@ -1633,14 +1681,18 @@ $("#validateAdminApiKey").addEventListener("click", async () => {
 
 $("#saveAdminApiKey").addEventListener("click", async () => {
   const status = $("#knowledgeStatus");
+  const config = collectAdminAiForm();
   status.hidden = false;
   status.className = "status is-loading";
   status.textContent = "Menyimpan API key admin...";
   try {
     await knowledgeApi("save_ai_config", {
       ...getKnowledgeAuth(),
-      config: collectAdminAiForm(),
+      config,
     });
+    if (config.provider === "custom") {
+      upsertAdminProviderOption(config.provider_label || "Provider Lain");
+    }
     $("#adminApiKey").value = "";
     $("#adminGeminiFallbackApiKey").value = "";
     status.className = "status is-success";
@@ -1940,6 +1992,9 @@ ATURAN PENULISAN (WAJIB):
 - Untuk nilai lab yang berubah gunakan format: nama nilai_awal→nilai_akhir satuan (mis. ureum 154→63 mg/dL).
 - Sertakan satuan untuk semua nilai lab/dosis.
 - Ambil HANYA data yang bermakna/penting. Abaikan info redundant.
+- Field "Operasi/Tindakan" berarti tindakan, prosedur, atau intervensi bermakna selama perawatan, bukan hanya operasi.
+- Masukkan bila ada: operasi, tindakan invasif/non-bedah, pemasangan alat (NGT, DC/kateter, dll), transfusi, HD, oksigenasi, nebulisasi, suction, ventilator, EKG, EEG, Echo, endoskopi, atau tindakan/prosedur bermakna lain.
+- Jangan masukkan tindakan rutin umum seperti infus biasa, injeksi obat rutin, atau pemberian obat oral biasa kecuali benar-benar merupakan tindakan bermakna.
 
 CONTOH GAYA YANG BENAR:
 Penunjang: "Hb 7,1 g/dL, ureum 154→63 mg/dL, SGOT/SGPT 75/134 U/L, USG abdomen: hydrops GB, cholelithiasis, Echo: LVEF 55,64%, TR mild."
@@ -1982,7 +2037,7 @@ Berikan output untuk: Pemeriksaan Penunjang Bermakna, Terapi Selama Dirawat, Ope
     const userMsg =
       "Data CPPT:\n\n" +
       state.cpptText +
-      "\n\nKembalikan JSON object dengan key PERSIS berikut: penunjang, terapi_dirawat, operasi, dx_utama, dx_sekunder, konsul, terapi_pulang. Jangan gunakan key lain. Setiap field berisi ringkasan singkat, padat, detail bermakna. Jika tidak ada data, isi dengan '-'.";
+      "\n\nKembalikan JSON object dengan key PERSIS berikut: penunjang, terapi_dirawat, operasi, dx_utama, dx_sekunder, konsul, terapi_pulang. Jangan gunakan key lain. Field operasi harus berisi tindakan/prosedur/intervensi bermakna termasuk NGT, DC, oksigenasi, nebulisasi, EKG, EEG, Echo, transfusi, HD, dan sejenisnya bila ada. Jangan masukkan tindakan rutin umum seperti infus biasa atau injeksi obat rutin. Jika tidak ada data, isi dengan '-'.";
 
     let text;
     await progress.setProgress("Menghubungi AI untuk memproses CPPT...", 45);
