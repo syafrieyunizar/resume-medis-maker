@@ -82,6 +82,7 @@ App ID yang saat ini dipakai:
 - `resume-medis-reviewer`
 - `eklaim-koding-assistant`
 - `soap-gen`
+- `icd-search-helper`
 
 ## Fitur yang Sudah Ada
 

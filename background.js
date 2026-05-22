@@ -12,6 +12,7 @@ const PROVIDERS = {
   gemini: { label: "Gemini", url: null },
   sumopod: { label: "Sumopod", url: "https://ai.sumopod.com/v1/chat/completions" },
   aimurah: { label: "AImurah", url: "https://aimurah.my.id/api/v1/chat/completions" },
+  x5lab: { label: "X5Lab", url: "https://api.x5lab.dev/v1/chat/completions" },
 };
 
 function buildImprovePrompt(kind, existingText, instruction) {
@@ -146,9 +147,38 @@ async function knowledgeApi(action, payload = {}) {
   return data;
 }
 
-async function callAdminAiText(prompt) {
+async function getStoredAdminUserSession() {
+  const { adminUserSession = null } = await chrome.storage.local.get(["adminUserSession"]);
+  return adminUserSession;
+}
+
+async function validateStoredAdminUserSession() {
+  const session = await getStoredAdminUserSession();
+  if (!session?.username || !session?.sessionToken || !session?.deviceId) return null;
+  try {
+    const data = await knowledgeApi("validate_user_session", {
+      username: session.username,
+      session_token: session.sessionToken,
+      device_id: session.deviceId,
+    });
+    const nextSession = {
+      username: data.session?.username || session.username,
+      sessionToken: session.sessionToken,
+      deviceId: data.session?.deviceId || session.deviceId,
+      expiresAt: data.session?.expiresAt || session.expiresAt || null,
+    };
+    await chrome.storage.local.set({ adminUserSession: nextSession });
+    return nextSession;
+  } catch (_error) {
+    await chrome.storage.local.remove(["adminUserSession"]);
+    return null;
+  }
+}
+
+async function callAdminAiText(prompt, userSession) {
   const data = await knowledgeApi("ai_generate", {
     prompt,
+    user_session: userSession,
   });
   return data.text || "";
 }
@@ -172,10 +202,13 @@ async function getEffectiveAiSettings() {
   }
   const data = await knowledgeApi("get_ai_config");
   if (!data.config?.hasApiKey) throw new Error("API key admin belum diset");
+  const adminUserSession = await validateStoredAdminUserSession();
+  if (!adminUserSession) throw new Error("Sesi admin di perangkat ini sudah tidak aktif. Silakan login ulang.");
   return {
     source: "admin",
     provider: data.config.provider,
     model: data.config.model,
+    adminUserSession,
   };
 }
 
@@ -235,7 +268,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     const ai = await getEffectiveAiSettings();
     const text =
       ai.source === "admin"
-        ? await callAdminAiText(prompt)
+        ? await callAdminAiText(prompt, ai.adminUserSession)
         : await callProviderText({
             provider: ai.provider,
             apiKey: ai.apiKey,

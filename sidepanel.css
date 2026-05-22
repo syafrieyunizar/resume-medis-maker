@@ -136,6 +136,9 @@ body.is-admin-mode .settings-button {
 .settings-main.is-admin-source #validateApiKey {
   display: none;
 }
+.settings-main:not(.is-admin-source) #adminUserAccessPanel {
+  display: none;
+}
 .admin-panel {
   display: flex;
   flex-direction: column;
@@ -193,6 +196,11 @@ body.is-admin-mode .settings-button {
   letter-spacing: -0.01em;
 }
 .hint { font-size: 11px; color: var(--ash-gray); }
+.inline-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
 
 .input, .textarea {
   width: 100%;
@@ -238,6 +246,10 @@ body.is-admin-mode .settings-button {
   border: 1px solid var(--cloud-gray);
 }
 .btn-outline:not(:disabled):hover { border-color: var(--ink-solid); }
+.btn-small {
+  font-size: 12px;
+  padding: 7px 10px;
+}
 
 .btn-success {
   background: var(--success);

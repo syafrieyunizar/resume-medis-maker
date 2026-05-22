@@ -32,6 +32,25 @@
           </select>
           <span class="hint">Jika memilih admin atau data pribadi kosong, extension memakai API key admin.</span>
         </label>
+        <div id="adminUserAccessPanel" class="settings-group settings-group-personal">
+          <span class="label">Akses API Key Admin</span>
+          <div id="adminUserSessionInfo" class="status" hidden></div>
+          <div id="adminUserLoginForm" class="settings-group settings-group-personal">
+            <label class="field">
+              <span class="label">Username</span>
+              <input id="adminAccessUsername" type="text" class="input" placeholder="Username akses admin" autocomplete="off" />
+            </label>
+            <label class="field">
+              <span class="label">Password</span>
+              <input id="adminAccessPassword" type="password" class="input" placeholder="Password akses admin" autocomplete="off" />
+            </label>
+            <div class="action-row">
+              <button id="loginAdminAccess" class="btn btn-primary" type="button">Login Akses Admin</button>
+              <button id="logoutAdminAccess" class="btn btn-outline" type="button" hidden>Keluar</button>
+            </div>
+          </div>
+          <div id="adminUserAccessStatus" class="status" hidden></div>
+        </div>
         <div id="personalApiSettings" class="settings-group settings-group-personal">
           <label class="field">
             <span class="label">Provider</span>
@@ -94,6 +113,7 @@
           <nav class="admin-tabs" role="tablist">
             <button class="admin-tab is-active" data-admin-tab="apikey" type="button">Apikey</button>
             <button class="admin-tab" data-admin-tab="knowledge" type="button">Knowledge</button>
+            <button class="admin-tab" data-admin-tab="user" type="button">User</button>
           </nav>
 
           <div class="admin-section is-active" data-admin-panel="apikey">
@@ -103,6 +123,7 @@
                 <option value="gemini">Gemini (Google)</option>
                 <option value="sumopod">Sumopod</option>
                 <option value="aimurah">AImurah</option>
+                <option value="x5lab">X5Lab</option>
                 <option value="custom">Provider Lain</option>
               </select>
             </label>
@@ -110,7 +131,7 @@
               <label class="field">
                 <span class="label">Nama Provider</span>
                 <input id="adminProviderLabel" type="text" class="input" placeholder="contoh: Genifty" autocomplete="off" />
-                <span class="hint">Nama ini akan tampil di dropdown provider admin untuk aplikasi ini.</span>
+                <span class="hint">Nama ini akan dipakai sebagai identitas provider dan tampil di dropdown aplikasi ini.</span>
               </label>
               <label class="field">
                 <span class="label">Endpoint URL</span>
@@ -138,6 +159,7 @@
             </div>
             <div class="action-row">
               <button id="validateAdminApiKey" class="btn btn-outline" type="button">Validasi API Key Admin</button>
+              <button id="resetAdminApiKey" class="btn btn-outline" type="button">Reset API Key Admin</button>
               <button id="saveAdminApiKey" class="btn btn-primary" type="button">Simpan API Key Admin</button>
             </div>
           </div>
@@ -180,6 +202,39 @@
 
             <button id="refreshKnowledgeList" class="btn btn-outline" type="button">Muat Knowledge Terakhir</button>
             <div id="knowledgeList" class="pulled-list is-empty">Belum ada data knowledge.</div>
+          </div>
+
+          <div class="admin-section" data-admin-panel="user" hidden>
+            <div class="action-row">
+              <button id="showAddAdminUser" class="btn btn-primary" type="button">Tambah User</button>
+            </div>
+            <div id="adminUserForm" class="settings-group" hidden>
+              <label class="field">
+                <span class="label">Username</span>
+                <input id="newAdminUserUsername" type="text" class="input" placeholder="contoh: dokter.andi" autocomplete="off" />
+              </label>
+              <label class="field">
+                <span class="label">Password</span>
+                <input id="newAdminUserPassword" type="password" class="input" placeholder="Password user" autocomplete="off" />
+              </label>
+              <div class="action-row">
+                <button id="cancelAddAdminUser" class="btn btn-outline" type="button">Cancel</button>
+                <button id="saveAdminUser" class="btn btn-primary" type="button">Simpan Data User</button>
+              </div>
+            </div>
+            <div id="adminUserResetForm" class="settings-group" hidden>
+              <span class="label">Reset Password User</span>
+              <div id="adminUserResetTarget" class="note">-</div>
+              <label class="field">
+                <span class="label">Password Baru</span>
+                <input id="resetAdminUserPassword" type="password" class="input" placeholder="Isi password baru" autocomplete="off" />
+              </label>
+              <div class="action-row">
+                <button id="cancelResetAdminUser" class="btn btn-outline" type="button">Cancel</button>
+                <button id="confirmResetAdminUser" class="btn btn-primary" type="button">Simpan Password Baru</button>
+              </div>
+            </div>
+            <div id="adminUserList" class="pulled-list is-empty">Belum ada user terdaftar.</div>
           </div>
         </div>
         <div id="knowledgeStatus" class="status" hidden></div>

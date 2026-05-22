@@ -6,6 +6,8 @@ const state = {
   cpptSummary: null,
   cpptPenunjang: "",
   penunjangFiles: [],
+  adminProviders: [],
+  adminUserResetTarget: "",
 };
 
 if (window.pdfjsLib) {
@@ -100,6 +102,9 @@ function createAiProgress({ panel, bar, text, status }) {
 
 function getAiErrorMessage(error, context = "Proses AI") {
   const message = String(error?.message || error || "");
+  if (/Sesi admin/i.test(message)) {
+    return `${context} gagal karena sesi API key admin sudah tidak aktif.\nSilakan login ulang dengan username dan password akses admin.`;
+  }
   if (/\b546\b/.test(message) || /timeout|timed out|too long/i.test(message)) {
     return `${context} terlalu lama atau data terlalu banyak.\nRekomendasi: kurangi panjang data yang dianalisa, gunakan knowledge yang lebih spesifik, coba ulangi, atau gunakan API key pribadi/provider yang lebih cepat.`;
   }
@@ -685,13 +690,68 @@ async function knowledgeApi(action, payload = {}) {
   return data;
 }
 
-async function callAdminAiText({ systemPrompt = "", userPrompt = "", prompt = "", responseJson = false, responseSchema = null }) {
+async function getOrCreateDeviceId() {
+  const { adminAccessDeviceId = "" } = await chrome.storage.local.get(["adminAccessDeviceId"]);
+  if (adminAccessDeviceId) return adminAccessDeviceId;
+  const nextId =
+    (globalThis.crypto && typeof globalThis.crypto.randomUUID === "function"
+      ? globalThis.crypto.randomUUID()
+      : `${Date.now()}-${Math.random().toString(16).slice(2)}`) || `${Date.now()}`;
+  await chrome.storage.local.set({ adminAccessDeviceId: nextId });
+  return nextId;
+}
+
+async function getStoredAdminUserSession() {
+  const { adminUserSession = null } = await chrome.storage.local.get(["adminUserSession"]);
+  return adminUserSession;
+}
+
+async function setStoredAdminUserSession(session) {
+  await chrome.storage.local.set({ adminUserSession: session });
+}
+
+async function clearStoredAdminUserSession() {
+  await chrome.storage.local.remove(["adminUserSession"]);
+}
+
+async function validateStoredAdminUserSession() {
+  const session = await getStoredAdminUserSession();
+  if (!session?.username || !session?.sessionToken || !session?.deviceId) return null;
+  try {
+    const data = await knowledgeApi("validate_user_session", {
+      username: session.username,
+      session_token: session.sessionToken,
+      device_id: session.deviceId,
+    });
+    const nextSession = {
+      username: data.session?.username || session.username,
+      sessionToken: session.sessionToken,
+      deviceId: data.session?.deviceId || session.deviceId,
+      expiresAt: data.session?.expiresAt || session.expiresAt || null,
+    };
+    await setStoredAdminUserSession(nextSession);
+    return nextSession;
+  } catch (_error) {
+    await clearStoredAdminUserSession();
+    return null;
+  }
+}
+
+async function callAdminAiText({
+  systemPrompt = "",
+  userPrompt = "",
+  prompt = "",
+  responseJson = false,
+  responseSchema = null,
+  userSession = null,
+}) {
   const data = await knowledgeApi("ai_generate", {
     systemPrompt,
     userPrompt,
     prompt,
     responseJson,
     responseSchema,
+    user_session: userSession,
   });
   return data.text || "";
 }
@@ -719,12 +779,17 @@ async function getEffectiveAiSettings() {
   }
   const data = await knowledgeApi("get_ai_config");
   if (!data.config?.hasApiKey) throw new Error("API key admin belum diset");
+  const adminUserSession = await validateStoredAdminUserSession();
+  if (!adminUserSession) {
+    throw new Error("Sesi admin di perangkat ini sudah tidak aktif. Silakan login ulang.");
+  }
   return {
     source: "admin",
     provider: data.config.provider,
     model: data.config.model,
     hasGeminiFallback: data.config.hasGeminiFallback,
     geminiFallbackModel: data.config.geminiFallbackModel || "gemini-2.0-flash",
+    adminUserSession,
   };
 }
 
@@ -733,6 +798,127 @@ function getKnowledgeAuth() {
     username: $("#knowledgeAdminUser").value.trim(),
     password: $("#knowledgeAdminPassword").value,
   };
+}
+
+function getAdminAccessHelpText(message) {
+  if (/Password salah/i.test(message) || /Username tidak terdaftar/i.test(message)) {
+    return `${message}\nSilakan menghubungi dr. Syafrie Yunizar untuk mendapatkan akses apikey admin.`;
+  }
+  return message;
+}
+
+function renderAdminAccessSession(session) {
+  const info = $("#adminUserSessionInfo");
+  const loginForm = $("#adminUserLoginForm");
+  const loginButton = $("#loginAdminAccess");
+  const logoutButton = $("#logoutAdminAccess");
+  const usernameInput = $("#adminAccessUsername");
+  const passwordInput = $("#adminAccessPassword");
+  if (!info || !loginForm || !loginButton || !logoutButton) return;
+  if (session?.username) {
+    info.hidden = false;
+    info.className = "status is-success";
+    info.textContent = `Login sebagai ${session.username}${session.expiresAt ? ` sampai ${new Date(session.expiresAt).toLocaleString("id-ID")}` : ""}`;
+    loginButton.hidden = true;
+    logoutButton.hidden = false;
+    if (usernameInput) {
+      usernameInput.value = session.username;
+      usernameInput.disabled = true;
+    }
+    if (passwordInput) {
+      passwordInput.value = "";
+      passwordInput.disabled = true;
+    }
+  } else {
+    info.hidden = true;
+    info.textContent = "";
+    loginButton.hidden = false;
+    logoutButton.hidden = true;
+    if (usernameInput) usernameInput.disabled = false;
+    if (passwordInput) passwordInput.disabled = false;
+  }
+}
+
+async function refreshAdminAccessUi() {
+  const session = await validateStoredAdminUserSession();
+  renderAdminAccessSession(session);
+  return session;
+}
+
+function renderAdminUserList(users) {
+  const list = $("#adminUserList");
+  if (!list) return;
+  if (!users?.length) {
+    list.className = "pulled-list is-empty";
+    list.textContent = "Belum ada user terdaftar.";
+    return;
+  }
+  list.className = "pulled-list";
+  list.textContent = "";
+  users.forEach((user) => {
+    const row = document.createElement("div");
+    row.className = "pulled-item";
+    const main = document.createElement("div");
+    main.className = "pulled-item-main";
+    const title = document.createElement("div");
+    title.className = "pulled-item-title";
+    title.textContent = user.username;
+    const meta = document.createElement("div");
+    meta.className = "pulled-item-meta";
+    meta.textContent = user.hasActiveDevice
+      ? `Device aktif${user.sessionExpiresAt ? ` · sesi sampai ${new Date(user.sessionExpiresAt).toLocaleString("id-ID")}` : ""}`
+      : "Belum ada device aktif";
+    const actions = document.createElement("div");
+    actions.className = "inline-actions";
+    const resetBtn = document.createElement("button");
+    resetBtn.type = "button";
+    resetBtn.className = "btn btn-outline btn-small";
+    resetBtn.textContent = "Reset Password";
+    resetBtn.addEventListener("click", () => {
+      state.adminUserResetTarget = user.username;
+      $("#adminUserResetTarget").textContent = `User: ${user.username}`;
+      $("#resetAdminUserPassword").value = "";
+      $("#adminUserResetForm").hidden = false;
+      $("#adminUserForm").hidden = true;
+    });
+    const deleteBtn = document.createElement("button");
+    deleteBtn.type = "button";
+    deleteBtn.className = "btn-remove";
+    deleteBtn.textContent = "🗑";
+    deleteBtn.setAttribute("aria-label", `Hapus user ${user.username}`);
+    deleteBtn.addEventListener("click", async () => {
+      if (!confirm(`Hapus user ${user.username}?`)) return;
+      const status = $("#knowledgeStatus");
+      status.hidden = false;
+      status.className = "status is-loading";
+      status.textContent = `Menghapus ${user.username}...`;
+      try {
+        await knowledgeApi("delete_user", { ...getKnowledgeAuth(), username: user.username });
+        status.className = "status is-success";
+        status.textContent = `User ${user.username} dihapus.`;
+        await loadAdminUsers();
+      } catch (e) {
+        status.className = "status is-error";
+        status.textContent = "Gagal hapus user: " + e.message;
+      }
+    });
+    actions.append(resetBtn, deleteBtn);
+    main.append(title, meta);
+    row.append(main, actions);
+    list.append(row);
+  });
+}
+
+async function loadAdminUsers() {
+  const status = $("#knowledgeStatus");
+  try {
+    const data = await knowledgeApi("list_users", getKnowledgeAuth());
+    renderAdminUserList(data.users || []);
+  } catch (e) {
+    status.hidden = false;
+    status.className = "status is-error";
+    status.textContent = "Gagal memuat user: " + e.message;
+  }
 }
 
 function renderKnowledgeList(chunks) {
@@ -1278,6 +1464,7 @@ const PROVIDERS = {
   gemini: { label: "Gemini", url: null /* dynamic */ },
   sumopod: { label: "Sumopod", url: "https://ai.sumopod.com/v1/chat/completions" },
   aimurah: { label: "AImurah", url: "https://aimurah.my.id/api/v1/chat/completions" },
+  x5lab: { label: "X5Lab", url: "https://api.x5lab.dev/v1/chat/completions" },
 };
 
 function getProviderLabel(provider, customLabel = "") {
@@ -1285,16 +1472,78 @@ function getProviderLabel(provider, customLabel = "") {
   return PROVIDERS[provider]?.label || provider || "Provider";
 }
 
-function upsertAdminProviderOption(label = "Provider Lain") {
+function isBuiltInAdminProvider(provider) {
+  return ["gemini", "sumopod", "aimurah", "x5lab"].includes(String(provider || "").trim());
+}
+
+function normalizeAdminProviderKey(value) {
+  return String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9_-]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
+
+function getAdminProviderMeta(provider) {
+  return state.adminProviders.find((item) => item.provider === provider) || null;
+}
+
+function renderAdminProviderOptions(providers = [], activeProvider = "gemini") {
   const select = $("#adminProvider");
   if (!select) return;
-  let option = select.querySelector('option[value="custom"]');
-  if (!option) {
-    option = document.createElement("option");
-    option.value = "custom";
+  const previousValue = activeProvider || select.value || "gemini";
+  const options = [
+    { value: "gemini", label: "Gemini (Google)" },
+    { value: "sumopod", label: "Sumopod" },
+    { value: "aimurah", label: "AImurah" },
+    { value: "x5lab", label: "X5Lab" },
+  ];
+  const seen = new Set(options.map((item) => item.value));
+  providers.forEach((provider) => {
+    if (!provider?.provider || seen.has(provider.provider)) return;
+    options.push({
+      value: provider.provider,
+      label: provider.providerLabel || getProviderLabel(provider.provider),
+    });
+    seen.add(provider.provider);
+  });
+  options.push({ value: "custom", label: "Provider Lain" });
+  select.textContent = "";
+  options.forEach((optionData) => {
+    const option = document.createElement("option");
+    option.value = optionData.value;
+    option.textContent = optionData.label;
     select.append(option);
+  });
+  if (!seen.has(previousValue) && previousValue !== "custom") {
+    const option = document.createElement("option");
+    option.value = previousValue;
+    option.textContent = getAdminProviderMeta(previousValue)?.providerLabel || previousValue;
+    select.insertBefore(option, select.lastElementChild);
   }
-  option.textContent = label;
+  select.value = previousValue;
+}
+
+function applyAdminProviderSelection(provider, fallbackModel = "") {
+  const config = getAdminProviderMeta(provider);
+  if (provider === "custom") {
+    $("#adminProviderLabel").value = "";
+    $("#adminBaseUrl").value = "";
+    if (fallbackModel) $("#adminModel").value = fallbackModel;
+    $("#adminApiKey").value = "";
+    $("#adminGeminiFallbackApiKey").value = "";
+    syncAdminSettingsFields(provider, fallbackModel);
+    return;
+  }
+  if (config) {
+    $("#adminProviderLabel").value = config.providerLabel || "";
+    $("#adminBaseUrl").value = config.baseUrl || "";
+    $("#adminModel").value = config.model || fallbackModel || "";
+    $("#adminGeminiFallbackModel").value = config.geminiFallbackModel || "gemini-2.0-flash";
+  }
+  $("#adminApiKey").value = "";
+  $("#adminGeminiFallbackApiKey").value = "";
+  syncAdminSettingsFields(provider, config?.model || fallbackModel || $("#adminModel").value.trim());
 }
 
 const KNOWLEDGE_FUNCTION_URL =
@@ -1461,7 +1710,9 @@ function syncApiKeySourceFields() {
   const useAdmin = $("#apiKeySource").value === "admin";
   $("#settingsMain")?.classList.toggle("is-admin-source", useAdmin);
   const personalGroup = $("#personalApiSettings");
+  const adminAccessPanel = $("#adminUserAccessPanel");
   if (personalGroup) personalGroup.hidden = useAdmin;
+  if (adminAccessPanel) adminAccessPanel.hidden = !useAdmin;
   ["provider", "apiKey", "model", "geminiFallbackApiKey", "geminiFallbackModel", "validateApiKey"].forEach((id) => {
     const el = $("#" + id);
     if (el) el.disabled = useAdmin;
@@ -1473,11 +1724,9 @@ function syncAdminSettingsFields(provider, modelValue) {
   const fallbackFields = $("#adminGeminiFallbackFields");
   const customFields = $("#adminCustomProviderFields");
   if (fallbackFields) fallbackFields.hidden = isGemini;
-  if (customFields) customFields.hidden = provider !== "custom";
+  if (customFields) customFields.hidden = provider !== "custom" && isBuiltInAdminProvider(provider);
   if ($("#adminModel")) $("#adminModel").value = modelValue || (isGemini ? "gemini-2.0-flash" : "");
 }
-
-upsertAdminProviderOption("Provider Lain");
 
 async function loadSettings() {
   const {
@@ -1502,6 +1751,7 @@ async function loadSettings() {
   $("#geminiFallbackModel").value = geminiFallbackModel;
   syncSettingsFields(provider, model);
   syncApiKeySourceFields();
+  await refreshAdminAccessUi();
 }
 loadSettings();
 
@@ -1509,15 +1759,19 @@ $("#provider").addEventListener("change", () => {
   syncSettingsFields($("#provider").value, $("#model").value.trim());
 });
 
-$("#apiKeySource").addEventListener("change", syncApiKeySourceFields);
+$("#apiKeySource").addEventListener("change", async () => {
+  syncApiKeySourceFields();
+  if ($("#apiKeySource").value === "admin") {
+    await refreshAdminAccessUi();
+  }
+});
 
 $("#adminProvider").addEventListener("change", () => {
-  syncAdminSettingsFields($("#adminProvider").value, $("#adminModel").value.trim());
+  applyAdminProviderSelection($("#adminProvider").value, $("#adminModel").value.trim());
 });
 
 $("#adminProviderLabel").addEventListener("input", () => {
   if ($("#adminProvider").value !== "custom") return;
-  upsertAdminProviderOption($("#adminProviderLabel").value.trim() || "Provider Lain");
 });
 
 function getCurrentModel() {
@@ -1610,9 +1864,12 @@ async function loadKnowledgeList() {
 }
 
 function collectAdminAiForm() {
+  const selectedProvider = $("#adminProvider").value;
+  const customLabel = $("#adminProviderLabel").value.trim();
+  const provider = selectedProvider === "custom" ? normalizeAdminProviderKey(customLabel) : selectedProvider;
   return {
-    provider: $("#adminProvider").value,
-    provider_label: $("#adminProviderLabel").value.trim(),
+    provider,
+    provider_label: customLabel || getAdminProviderMeta(selectedProvider)?.providerLabel || getProviderLabel(selectedProvider),
     base_url: $("#adminBaseUrl").value.trim(),
     api_key: $("#adminApiKey").value.trim(),
     model: $("#adminModel").value.trim(),
@@ -1624,12 +1881,16 @@ function collectAdminAiForm() {
 async function loadAdminAiConfig() {
   const data = await knowledgeApi("get_ai_config");
   const config = data.config;
+  state.adminProviders = Array.isArray(data.providers) ? data.providers : [];
+  renderAdminProviderOptions(state.adminProviders, config?.provider || "gemini");
   if (!config) {
-    upsertAdminProviderOption("Provider Lain");
-    syncAdminSettingsFields($("#adminProvider").value, $("#adminModel").value.trim());
+    $("#adminProviderLabel").value = "";
+    $("#adminBaseUrl").value = "";
+    $("#adminModel").value = "gemini-2.0-flash";
+    $("#adminGeminiFallbackModel").value = "gemini-2.0-flash";
+    applyAdminProviderSelection($("#adminProvider").value, $("#adminModel").value.trim());
     return;
   }
-  upsertAdminProviderOption(config.provider === "custom" ? config.providerLabel || "Provider Lain" : "Provider Lain");
   $("#adminProvider").value = config.provider || "gemini";
   $("#adminProviderLabel").value = config.providerLabel || "";
   $("#adminBaseUrl").value = config.baseUrl || "";
@@ -1637,7 +1898,7 @@ async function loadAdminAiConfig() {
   $("#adminApiKey").value = "";
   $("#adminGeminiFallbackApiKey").value = "";
   $("#adminGeminiFallbackModel").value = config.geminiFallbackModel || "gemini-2.0-flash";
-  syncAdminSettingsFields($("#adminProvider").value, $("#adminModel").value.trim());
+  applyAdminProviderSelection($("#adminProvider").value, $("#adminModel").value.trim());
 }
 
 $("#knowledgeLogin").addEventListener("click", async () => {
@@ -1652,6 +1913,7 @@ $("#knowledgeLogin").addEventListener("click", async () => {
     status.textContent = "Admin aktif. Knowledge bisa dikelola.";
     await loadAdminAiConfig();
     await loadKnowledgeList();
+    await loadAdminUsers();
   } catch (e) {
     $("#knowledgeAdminPanel").hidden = true;
     status.className = "status is-error";
@@ -1659,9 +1921,79 @@ $("#knowledgeLogin").addEventListener("click", async () => {
   }
 });
 
+$("#loginAdminAccess").addEventListener("click", async () => {
+  const status = $("#adminUserAccessStatus");
+  const username = $("#adminAccessUsername").value.trim();
+  const password = $("#adminAccessPassword").value;
+  if (!username || !password) {
+    status.hidden = false;
+    status.className = "status is-error";
+    status.textContent = "Username dan password wajib diisi.";
+    return;
+  }
+  status.hidden = false;
+  status.className = "status is-loading";
+  status.textContent = "Memeriksa akses API key admin...";
+  try {
+    const deviceId = await getOrCreateDeviceId();
+    const data = await knowledgeApi("login_user", {
+      username,
+      password,
+      device_id: deviceId,
+    });
+    await setStoredAdminUserSession({
+      username: data.session?.username || username.toLowerCase(),
+      sessionToken: data.session?.sessionToken,
+      deviceId: data.session?.deviceId || deviceId,
+      expiresAt: data.session?.expiresAt || null,
+    });
+    $("#adminAccessPassword").value = "";
+    status.hidden = false;
+    status.className = "status is-success";
+    status.textContent = "Akses API key admin aktif.";
+    await refreshAdminAccessUi();
+  } catch (e) {
+    status.hidden = false;
+    status.className = "status is-error";
+    status.textContent = getAdminAccessHelpText(String(e.message || e));
+  }
+});
+
+$("#logoutAdminAccess").addEventListener("click", async () => {
+  const status = $("#adminUserAccessStatus");
+  const session = await getStoredAdminUserSession();
+  try {
+    if (session?.username) {
+      await knowledgeApi("logout_user", {
+        username: session.username,
+      });
+    }
+  } catch (_error) {
+    // best effort
+  }
+  await clearStoredAdminUserSession();
+  renderAdminAccessSession(null);
+  $("#adminAccessUsername").value = "";
+  $("#adminAccessPassword").value = "";
+  status.hidden = false;
+  status.className = "status";
+  status.textContent = "Akses API key admin telah keluar.";
+});
+
 $("#validateAdminApiKey").addEventListener("click", async () => {
   const status = $("#knowledgeStatus");
-  const config = collectAdminAiForm();
+  let config;
+  try {
+    config = collectAdminAiForm();
+    if ($("#adminProvider").value === "custom" && !config.provider) {
+      throw new Error("Nama provider custom wajib diisi");
+    }
+  } catch (e) {
+    status.hidden = false;
+    status.className = "status is-error";
+    status.textContent = e.message;
+    return;
+  }
   status.hidden = false;
   status.className = "status is-loading";
   status.textContent = `Memvalidasi ${getProviderLabel(config.provider, config.provider_label)}...`;
@@ -1681,26 +2013,87 @@ $("#validateAdminApiKey").addEventListener("click", async () => {
 
 $("#saveAdminApiKey").addEventListener("click", async () => {
   const status = $("#knowledgeStatus");
-  const config = collectAdminAiForm();
+  let config;
+  try {
+    config = collectAdminAiForm();
+    if ($("#adminProvider").value === "custom" && !config.provider) {
+      throw new Error("Nama provider custom wajib diisi");
+    }
+  } catch (e) {
+    status.hidden = false;
+    status.className = "status is-error";
+    status.textContent = e.message;
+    return;
+  }
   status.hidden = false;
   status.className = "status is-loading";
   status.textContent = "Menyimpan API key admin...";
   try {
-    await knowledgeApi("save_ai_config", {
+    const data = await knowledgeApi("save_ai_config", {
       ...getKnowledgeAuth(),
       config,
     });
-    if (config.provider === "custom") {
-      upsertAdminProviderOption(config.provider_label || "Provider Lain");
-    }
+    state.adminProviders = Array.isArray(data.providers) ? data.providers : state.adminProviders;
+    renderAdminProviderOptions(state.adminProviders, data.config?.provider || config.provider);
+    $("#adminProvider").value = data.config?.provider || config.provider;
+    $("#adminProviderLabel").value = data.config?.providerLabel || config.provider_label || "";
+    $("#adminBaseUrl").value = data.config?.baseUrl || config.base_url || "";
+    $("#adminModel").value = data.config?.model || config.model || "";
     $("#adminApiKey").value = "";
     $("#adminGeminiFallbackApiKey").value = "";
+    $("#adminGeminiFallbackModel").value =
+      data.config?.geminiFallbackModel || config.gemini_fallback_model || "gemini-2.0-flash";
+    applyAdminProviderSelection($("#adminProvider").value, $("#adminModel").value.trim());
     status.className = "status is-success";
     status.textContent = "API key admin tersimpan. User dapat memakai sumber API key admin.";
     toast("API key admin tersimpan", "success");
   } catch (e) {
     status.className = "status is-error";
     status.textContent = "Gagal simpan API key admin: " + e.message;
+  }
+});
+
+$("#resetAdminApiKey").addEventListener("click", async () => {
+  const status = $("#knowledgeStatus");
+  const selectedProvider = $("#adminProvider").value;
+  const providerKey =
+    selectedProvider === "custom"
+      ? normalizeAdminProviderKey($("#adminProviderLabel").value.trim())
+      : selectedProvider;
+  if (!providerKey) {
+    status.hidden = false;
+    status.className = "status is-error";
+    status.textContent = "Pilih provider admin yang ingin direset.";
+    return;
+  }
+  status.hidden = false;
+  status.className = "status is-loading";
+  status.textContent = `Mereset ${getProviderLabel(providerKey, $("#adminProviderLabel").value.trim())}...`;
+  try {
+    const data = await knowledgeApi("reset_ai_config", {
+      ...getKnowledgeAuth(),
+      provider: providerKey,
+    });
+    state.adminProviders = Array.isArray(data.providers) ? data.providers : state.adminProviders;
+    renderAdminProviderOptions(state.adminProviders, data.config?.provider || providerKey);
+    $("#adminProvider").value = data.config?.provider || providerKey;
+    $("#adminProviderLabel").value = data.config?.providerLabel || getAdminProviderMeta(providerKey)?.providerLabel || "";
+    $("#adminBaseUrl").value = data.config?.baseUrl || getAdminProviderMeta(providerKey)?.baseUrl || "";
+    $("#adminModel").value = data.config?.model || getAdminProviderMeta(providerKey)?.model || "";
+    $("#adminApiKey").value = "";
+    $("#adminGeminiFallbackApiKey").value = "";
+    $("#adminGeminiFallbackModel").value =
+      data.config?.geminiFallbackModel ||
+      getAdminProviderMeta(providerKey)?.geminiFallbackModel ||
+      "gemini-2.0-flash";
+    applyAdminProviderSelection($("#adminProvider").value, $("#adminModel").value.trim());
+    status.className = "status is-success";
+    status.textContent = "API key admin berhasil dikosongkan. Silakan isi API key baru.";
+    toast("API key admin direset", "success");
+  } catch (e) {
+    status.className = "status is-error";
+    status.textContent = "Reset API key admin gagal: " + e.message;
+    toast("Reset API key admin gagal", "error");
   }
 });
 
@@ -1788,6 +2181,92 @@ $("#saveKnowledgeChunks").addEventListener("click", async () => {
 });
 
 $("#refreshKnowledgeList").addEventListener("click", loadKnowledgeList);
+
+$("#showAddAdminUser").addEventListener("click", () => {
+  $("#adminUserForm").hidden = false;
+  $("#adminUserResetForm").hidden = true;
+  $("#newAdminUserUsername").value = "";
+  $("#newAdminUserPassword").value = "";
+});
+
+$("#cancelAddAdminUser").addEventListener("click", () => {
+  $("#adminUserForm").hidden = true;
+  $("#newAdminUserUsername").value = "";
+  $("#newAdminUserPassword").value = "";
+});
+
+$("#saveAdminUser").addEventListener("click", async () => {
+  const status = $("#knowledgeStatus");
+  const username = $("#newAdminUserUsername").value.trim();
+  const password = $("#newAdminUserPassword").value;
+  if (!username || !password) {
+    status.hidden = false;
+    status.className = "status is-error";
+    status.textContent = "Username dan password user wajib diisi.";
+    return;
+  }
+  status.hidden = false;
+  status.className = "status is-loading";
+  status.textContent = "Menyimpan user baru...";
+  try {
+    await knowledgeApi("create_user", {
+      ...getKnowledgeAuth(),
+      username,
+      password,
+    });
+    $("#adminUserForm").hidden = true;
+    $("#newAdminUserUsername").value = "";
+    $("#newAdminUserPassword").value = "";
+    status.className = "status is-success";
+    status.textContent = `User ${username} tersimpan.`;
+    await loadAdminUsers();
+  } catch (e) {
+    status.className = "status is-error";
+    status.textContent = "Gagal simpan user: " + e.message;
+  }
+});
+
+$("#cancelResetAdminUser").addEventListener("click", () => {
+  state.adminUserResetTarget = "";
+  $("#adminUserResetForm").hidden = true;
+  $("#resetAdminUserPassword").value = "";
+});
+
+$("#confirmResetAdminUser").addEventListener("click", async () => {
+  const status = $("#knowledgeStatus");
+  const password = $("#resetAdminUserPassword").value;
+  if (!state.adminUserResetTarget) {
+    status.hidden = false;
+    status.className = "status is-error";
+    status.textContent = "User reset tidak ditemukan.";
+    return;
+  }
+  if (!password) {
+    status.hidden = false;
+    status.className = "status is-error";
+    status.textContent = "Password baru wajib diisi.";
+    return;
+  }
+  status.hidden = false;
+  status.className = "status is-loading";
+  status.textContent = `Mereset password ${state.adminUserResetTarget}...`;
+  try {
+    await knowledgeApi("reset_user_password", {
+      ...getKnowledgeAuth(),
+      username: state.adminUserResetTarget,
+      password,
+    });
+    $("#adminUserResetForm").hidden = true;
+    $("#resetAdminUserPassword").value = "";
+    status.className = "status is-success";
+    status.textContent = `Password ${state.adminUserResetTarget} diperbarui.`;
+    state.adminUserResetTarget = "";
+    await loadAdminUsers();
+  } catch (e) {
+    status.className = "status is-error";
+    status.textContent = "Reset password gagal: " + e.message;
+  }
+});
 
 // ---------------- SO: Insert detail ----------------
 const pullSOButton = $("#pullSO");
@@ -2048,6 +2527,7 @@ Berikan output untuk: Pemeriksaan Penunjang Bermakna, Terapi Selama Dirawat, Ope
         userPrompt: userMsg,
         responseJson: true,
         responseSchema: schema,
+        userSession: ai.adminUserSession,
       });
     } else if (ai.provider === "gemini") {
       const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(
@@ -2345,6 +2825,7 @@ summarizePenunjangBtn.addEventListener("click", async () => {
         userPrompt:
           "Rangkum pemeriksaan penunjang bermakna dari hasil ekstraksi PDF berikut:\n\n" +
           JSON.stringify(parsedDocs),
+        userSession: ai.adminUserSession,
       });
       progress.stop();
     } else if (ai.provider === "gemini") {
@@ -2536,7 +3017,7 @@ $("#analyzeClaimBpjs").addEventListener("click", async () => {
     const ai = await getEffectiveAiSettings();
     const analysis =
       ai.source === "admin"
-        ? await callAdminAiText({ prompt, responseJson: true })
+        ? await callAdminAiText({ prompt, responseJson: true, userSession: ai.adminUserSession })
         : await callProviderText({ provider: ai.provider, apiKey: ai.apiKey, model: ai.model, prompt });
     if (!analysis.trim()) throw new Error("Respons analisa kosong dari provider");
 
