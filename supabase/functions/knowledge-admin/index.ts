@@ -282,8 +282,9 @@ function publicAdminUser(user: AdminAiUser) {
 }
 
 async function createAdminAiUser(payload: Record<string, unknown>) {
-  const username = normalizeUsername(payload.username);
-  const password = String(payload.password || "").trim();
+  const userPayload = (payload.user && typeof payload.user === "object" ? payload.user : payload) as Record<string, unknown>;
+  const username = normalizeUsername(userPayload.username);
+  const password = String(userPayload.password || "").trim();
   if (password.length < 4) throw new Error("Password minimal 4 karakter");
   const existing = await getAdminAiUser(username);
   if (existing) throw new Error("Username sudah terdaftar");
@@ -304,8 +305,9 @@ async function createAdminAiUser(payload: Record<string, unknown>) {
 }
 
 async function resetAdminAiUserPassword(payload: Record<string, unknown>) {
-  const username = normalizeUsername(payload.username);
-  const password = String(payload.password || "").trim();
+  const userPayload = (payload.user && typeof payload.user === "object" ? payload.user : payload) as Record<string, unknown>;
+  const username = normalizeUsername(userPayload.username);
+  const password = String(userPayload.password || "").trim();
   if (password.length < 4) throw new Error("Password minimal 4 karakter");
   const existing = await getAdminAiUser(username);
   if (!existing) throw new Error("Username tidak terdaftar");
@@ -323,7 +325,8 @@ async function resetAdminAiUserPassword(payload: Record<string, unknown>) {
 }
 
 async function deleteAdminAiUser(payload: Record<string, unknown>) {
-  const username = normalizeUsername(payload.username);
+  const userPayload = (payload.user && typeof payload.user === "object" ? payload.user : payload) as Record<string, unknown>;
+  const username = normalizeUsername(userPayload.username);
   await supabaseRequest(`admin_ai_users?username=eq.${encodeURIComponent(username)}`, {
     method: "DELETE",
   });

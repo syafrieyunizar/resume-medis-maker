@@ -8,6 +8,7 @@ const state = {
   penunjangFiles: [],
   adminProviders: [],
   adminUserResetTarget: "",
+  adminBackendAuth: null,
 };
 
 if (window.pdfjsLib) {
@@ -794,6 +795,12 @@ async function getEffectiveAiSettings() {
 }
 
 function getKnowledgeAuth() {
+  if (state.adminBackendAuth?.username && state.adminBackendAuth?.password) {
+    return {
+      username: state.adminBackendAuth.username,
+      password: state.adminBackendAuth.password,
+    };
+  }
   return {
     username: $("#knowledgeAdminUser").value.trim(),
     password: $("#knowledgeAdminPassword").value,
@@ -893,7 +900,10 @@ function renderAdminUserList(users) {
       status.className = "status is-loading";
       status.textContent = `Menghapus ${user.username}...`;
       try {
-        await knowledgeApi("delete_user", { ...getKnowledgeAuth(), username: user.username });
+        await knowledgeApi("delete_user", {
+          ...getKnowledgeAuth(),
+          user: { username: user.username },
+        });
         status.className = "status is-success";
         status.textContent = `User ${user.username} dihapus.`;
         await loadAdminUsers();
@@ -1903,11 +1913,16 @@ async function loadAdminAiConfig() {
 
 $("#knowledgeLogin").addEventListener("click", async () => {
   const status = $("#knowledgeStatus");
+  const credentials = {
+    username: $("#knowledgeAdminUser").value.trim(),
+    password: $("#knowledgeAdminPassword").value,
+  };
   status.hidden = false;
   status.className = "status is-loading";
   status.textContent = "Memeriksa login admin...";
   try {
-    await knowledgeApi("login", getKnowledgeAuth());
+    await knowledgeApi("login", credentials);
+    state.adminBackendAuth = credentials;
     enterKnowledgeAdminMode();
     status.className = "status is-success";
     status.textContent = "Admin aktif. Knowledge bisa dikelola.";
@@ -1915,6 +1930,7 @@ $("#knowledgeLogin").addEventListener("click", async () => {
     await loadKnowledgeList();
     await loadAdminUsers();
   } catch (e) {
+    state.adminBackendAuth = null;
     $("#knowledgeAdminPanel").hidden = true;
     status.className = "status is-error";
     status.textContent = "Login gagal: " + e.message;
@@ -2099,6 +2115,7 @@ $("#resetAdminApiKey").addEventListener("click", async () => {
 
 $("#exitKnowledgeAdmin").addEventListener("click", () => {
   exitKnowledgeAdminMode();
+  state.adminBackendAuth = null;
   const status = $("#knowledgeStatus");
   status.hidden = true;
 });
@@ -2211,8 +2228,10 @@ $("#saveAdminUser").addEventListener("click", async () => {
   try {
     await knowledgeApi("create_user", {
       ...getKnowledgeAuth(),
-      username,
-      password,
+      user: {
+        username,
+        password,
+      },
     });
     $("#adminUserForm").hidden = true;
     $("#newAdminUserUsername").value = "";
@@ -2253,8 +2272,10 @@ $("#confirmResetAdminUser").addEventListener("click", async () => {
   try {
     await knowledgeApi("reset_user_password", {
       ...getKnowledgeAuth(),
-      username: state.adminUserResetTarget,
-      password,
+      user: {
+        username: state.adminUserResetTarget,
+        password,
+      },
     });
     $("#adminUserResetForm").hidden = true;
     $("#resetAdminUserPassword").value = "";
