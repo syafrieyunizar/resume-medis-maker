@@ -2,9 +2,12 @@ const $ = (sel) => document.querySelector(sel);
 const $$ = (sel) => document.querySelectorAll(sel);
 
 const state = {
+  cpptMode: "",
   cpptText: "",
   cpptSummary: null,
   cpptPenunjang: "",
+  cpptResultReady: false,
+  cpptSources: [],
   penunjangFiles: [],
   adminProviders: [],
   adminUserResetTarget: "",
@@ -51,7 +54,7 @@ function wait(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-function createAiProgress({ panel, bar, text, status }) {
+function createAiProgress({ panel, bar, text, status, mirrorLoadingToStatus = true }) {
   let percent = 0;
   let timer = null;
   const startedAt = Date.now();
@@ -61,9 +64,11 @@ function createAiProgress({ panel, bar, text, status }) {
     bar.className = "progress-fill";
     bar.style.width = `${percent}%`;
     text.textContent = message;
-    status.hidden = false;
-    status.className = "status is-loading";
-    status.textContent = message;
+    if (status && mirrorLoadingToStatus) {
+      status.hidden = false;
+      status.className = "status is-loading";
+      status.textContent = message;
+    }
     await wait(250);
   };
   const startWaiting = (message) => {
@@ -75,7 +80,9 @@ function createAiProgress({ panel, bar, text, status }) {
       }
       const next = `${message}... ${elapsed} detik`;
       text.textContent = next;
-      status.textContent = `${next}. Proses 30-180 detik tergantung panjang data dan provider.`;
+      if (status && mirrorLoadingToStatus) {
+        status.textContent = `${next}. Proses 30-180 detik tergantung panjang data dan provider.`;
+      }
     }, 1000);
   };
   const stop = () => {
@@ -88,15 +95,19 @@ function createAiProgress({ panel, bar, text, status }) {
     bar.style.width = "100%";
     bar.className = "progress-fill is-success";
     text.textContent = message;
-    status.hidden = false;
-    status.className = "status is-success";
-    status.textContent = message;
+    if (status) {
+      status.hidden = false;
+      status.className = "status is-success";
+      status.textContent = message;
+    }
   };
   const fail = (message) => {
     stop();
-    status.hidden = false;
-    status.className = "status is-error";
-    status.textContent = message;
+    if (status) {
+      status.hidden = false;
+      status.className = "status is-error";
+      status.textContent = message;
+    }
   };
   return { setProgress, startWaiting, stop, complete, fail };
 }
@@ -104,7 +115,7 @@ function createAiProgress({ panel, bar, text, status }) {
 function getAiErrorMessage(error, context = "Proses AI") {
   const message = String(error?.message || error || "");
   if (/Sesi admin/i.test(message)) {
-    return `${context} gagal karena sesi API key admin sudah tidak aktif.\nSilakan login ulang dengan username dan password akses admin.`;
+    return `${context} gagal karena sesi API key admin sudah tidak aktif.\nSilakan login ulang dengan username dan password akses admin pada menu setting.`;
   }
   if (/\b546\b/.test(message) || /timeout|timed out|too long/i.test(message)) {
     return `${context} terlalu lama atau data terlalu banyak.\nRekomendasi: kurangi panjang data yang dianalisa, gunakan knowledge yang lebih spesifik, coba ulangi, atau gunakan API key pribadi/provider yang lebih cepat.`;
@@ -143,6 +154,50 @@ function toast(msg, type = "") {
   clearTimeout(toast._t);
   toast._t = setTimeout(() => (el.hidden = true), 2500);
 }
+
+let decisionModalResolve = null;
+
+function closeDecisionModal(value) {
+  const modal = $("#decisionModal");
+  modal.hidden = true;
+  if (decisionModalResolve) {
+    decisionModalResolve(value);
+    decisionModalResolve = null;
+  }
+}
+
+function showDecisionModal({ title, message, primaryText, secondaryText }) {
+  const modal = $("#decisionModal");
+  $("#decisionModalTitle").textContent = title;
+  $("#decisionModalMessage").textContent = message;
+  $("#decisionModalPrimary").textContent = primaryText;
+  $("#decisionModalSecondary").textContent = secondaryText;
+  modal.hidden = false;
+  $("#decisionModalPrimary").focus();
+  return new Promise((resolve) => {
+    decisionModalResolve = resolve;
+  });
+}
+
+async function askApiKeySaveMode() {
+  const firstChoice = await showDecisionModal({
+    title: "Validasi API key?",
+    message: "Apikey akan disimpan. Apakah ingin memvalidasi apikey dahulu?",
+    primaryText: "Validasi",
+    secondaryText: "Tidak",
+  });
+  if (firstChoice === "primary") return "validate";
+  const secondChoice = await showDecisionModal({
+    title: "Apikey tidak divalidasi.",
+    message: "Tetap Simpan?",
+    primaryText: "Iya, Simpan",
+    secondaryText: "Tidak",
+  });
+  return secondChoice === "primary" ? "save_without_validation" : "cancel";
+}
+
+$("#decisionModalPrimary")?.addEventListener("click", () => closeDecisionModal("primary"));
+$("#decisionModalSecondary")?.addEventListener("click", () => closeDecisionModal("secondary"));
 
 function formatBytes(bytes) {
   if (!Number.isFinite(bytes) || bytes <= 0) return "-";
@@ -738,6 +793,54 @@ async function validateStoredAdminUserSession() {
   }
 }
 
+async function renderActiveApiKeyStatus() {
+  const box = $("#activeApiKeyStatus");
+  if (!box) return;
+  const settings = await chrome.storage.local.get([
+    "apiKeySource",
+    "apiKey",
+    "model",
+    "provider",
+    "customProviderLabel",
+    "personalApiKeyValidated",
+  ]);
+  const setStatus = (className, text) => {
+    box.className = `active-apikey-status ${className}`;
+    box.textContent = text;
+  };
+  if (settings.apiKeySource === "personal") {
+    if (!settings.apiKey || !settings.model || !settings.provider) {
+      setStatus("is-error", "Tidak ada apikey aktif");
+      return;
+    }
+    const providerLabel = getProviderDisplay(settings.provider, settings.customProviderLabel || "");
+    if (settings.personalApiKeyValidated) {
+      setStatus("is-success", `${providerLabel} Aktif dari Apikey Pribadi`);
+    } else {
+      setStatus("is-warning", `${providerLabel} tersimpan dari Apikey Pribadi, belum divalidasi`);
+    }
+    return;
+  }
+  const session = await validateStoredAdminUserSession();
+  if (!session) {
+    setStatus("is-error", "Tidak ada apikey aktif");
+    return;
+  }
+  try {
+    const data = await knowledgeApi("get_ai_config");
+    if (!data.config?.hasApiKey) {
+      setStatus("is-error", "Tidak ada apikey aktif");
+      return;
+    }
+    setStatus(
+      "is-success",
+      `${getProviderLabel(data.config.provider, data.config.providerLabel)} Aktif dari Apikey Admin, user : ${session.username}`
+    );
+  } catch (_error) {
+    setStatus("is-warning", `Apikey Admin dipilih, user : ${session.username}. Status provider belum terbaca`);
+  }
+}
+
 async function callAdminAiText({
   systemPrompt = "",
   userPrompt = "",
@@ -763,6 +866,8 @@ async function getEffectiveAiSettings() {
     "apiKey",
     "model",
     "provider",
+    "customProviderLabel",
+    "customBaseUrl",
     "geminiFallbackApiKey",
     "geminiFallbackModel",
   ]);
@@ -774,6 +879,8 @@ async function getEffectiveAiSettings() {
       apiKey: settings.apiKey,
       model: settings.model,
       provider: settings.provider,
+      providerLabel: settings.customProviderLabel || "",
+      baseUrl: settings.customBaseUrl || "",
       geminiFallbackApiKey: settings.geminiFallbackApiKey || "",
       geminiFallbackModel: settings.geminiFallbackModel || "gemini-2.0-flash",
     };
@@ -1202,7 +1309,7 @@ KNOWLEDGE RELEVAN:
 ${JSON.stringify(chunks, null, 2)}`;
 }
 
-async function callProviderText({ provider, apiKey, model, prompt }) {
+async function callProviderText({ provider, apiKey, model, prompt, baseUrl = "", providerLabel = "" }) {
   if (provider === "gemini") {
     const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(
       model
@@ -1220,7 +1327,7 @@ async function callProviderText({ provider, apiKey, model, prompt }) {
     return data?.candidates?.[0]?.content?.parts?.[0]?.text || "";
   }
 
-  const endpoint = PROVIDERS[provider]?.url;
+  const endpoint = getProviderEndpoint(provider, baseUrl);
   if (!endpoint) throw new Error("Provider tidak dikenal: " + provider);
   const res = await fetch(endpoint, {
     method: "POST",
@@ -1429,9 +1536,66 @@ function summarizeCpptTable(tableData, fallbackText = "") {
   };
 }
 
+function hashText(text) {
+  let hash = 0;
+  const input = String(text || "");
+  for (let i = 0; i < input.length; i += 1) {
+    hash = (hash << 5) - hash + input.charCodeAt(i);
+    hash |= 0;
+  }
+  return String(hash);
+}
+
+function makeCpptSource(result, index) {
+  const summary = summarizeCpptTable(result.table, result.text);
+  return {
+    id: hashText(`${result.text}\n${JSON.stringify(result.table || {})}`),
+    label: `CPPT ${index}`,
+    text: result.text,
+    table: result.table,
+    summary,
+  };
+}
+
+function summarizeCpptSources(sources) {
+  if (!sources.length) return null;
+  const parsedDates = sources
+    .flatMap((source) => source.table?.dates || [])
+    .map(parseFlexibleDate)
+    .filter((date) => date && !Number.isNaN(date.getTime()))
+    .sort((a, b) => a.getTime() - b.getTime());
+  const startDate = parsedDates[0] ? adjustCarePeriodStart(parsedDates[0]) : null;
+  const endDate = parsedDates[parsedDates.length - 1] || null;
+  const periodText =
+    startDate && endDate ? `${formatDateId(startDate)} - ${formatDateId(endDate)}` : "-";
+  return {
+    rowCount: sources.reduce((total, source) => total + (source.summary?.rowCount || 0), 0),
+    startDate,
+    endDate,
+    periodText,
+  };
+}
+
+function combineCpptSources() {
+  state.cpptText = state.cpptSources
+    .map((source, index) => {
+      const period = source.summary?.periodText && source.summary.periodText !== "-"
+        ? ` (${source.summary.periodText})`
+        : "";
+      return `=== CPPT Ruangan ${index + 1}${period} ===\n${source.text}`;
+    })
+    .join("\n\n");
+  state.cpptSummary = summarizeCpptSources(state.cpptSources);
+}
+
 function renderCpptAccessSummary(summary) {
   const box = $("#cpptAccessSummary");
   if (!box) return;
+  if (!summary) {
+    box.hidden = true;
+    box.textContent = "";
+    return;
+  }
   box.hidden = false;
   box.className = "status cppt-summary";
   box.textContent = "";
@@ -1455,6 +1619,125 @@ function renderCpptAccessSummary(summary) {
   periodLine.append(periodValue);
 
   box.append(statusLine, rowsLine, periodLine);
+}
+
+function renderCpptSourceList() {
+  const list = $("#cpptSourceList");
+  if (!list) return;
+  if (state.cpptMode !== "multi" || !state.cpptSources.length) {
+    list.hidden = true;
+    list.textContent = "";
+    return;
+  }
+  list.hidden = false;
+  list.classList.remove("is-empty");
+  list.textContent = "";
+  state.cpptSources.forEach((source, index) => {
+    const item = document.createElement("div");
+    item.className = "pulled-item";
+    const main = document.createElement("div");
+    main.className = "pulled-item-main";
+    const title = document.createElement("strong");
+    title.className = "pulled-item-title";
+    title.textContent = `${index + 1}. ${source.label} diakses`;
+    const meta = document.createElement("span");
+    meta.className = "pulled-item-meta";
+    meta.style.display = "block";
+    meta.textContent = `Jumlah baris ${source.summary?.rowCount || 0}, periode ${source.summary?.periodText || "-"}`;
+    main.append(title, meta);
+    item.append(main);
+    list.append(item);
+  });
+}
+
+function updateCpptRoomStatus(message = "") {
+  const status = $("#cpptRoomStatus");
+  if (!status) return;
+  if (!message) {
+    status.hidden = true;
+    status.textContent = "";
+    return;
+  }
+  status.hidden = false;
+  status.className = "status";
+  status.textContent = message;
+}
+
+function clearCpptResultFields() {
+  state.cpptResultReady = false;
+  const results = $("#cpptResults");
+  if (results) results.hidden = true;
+  $$("#cpptResults textarea").forEach((ta) => {
+    ta.value = "";
+  });
+  updateCpptPenunjangLinked("");
+}
+
+function updateCpptControls() {
+  const singleBtn = $("#cpptModeSingle");
+  const multiBtn = $("#cpptModeMulti");
+  const guide = $("#cpptMultiGuide");
+  const modeStep = $("#cpptModeStep");
+  const workflow = $("#cpptWorkflow");
+  const results = $("#cpptResults");
+  if (singleBtn && multiBtn) {
+    singleBtn.className = `btn ${state.cpptMode === "single" ? "btn-primary" : "btn-outline"}`;
+    multiBtn.className = `btn ${state.cpptMode === "multi" ? "btn-primary" : "btn-outline"}`;
+  }
+  if (modeStep) modeStep.hidden = Boolean(state.cpptMode);
+  if (workflow) workflow.hidden = !state.cpptMode;
+  if (results) results.hidden = !state.cpptResultReady;
+  if (guide) guide.hidden = state.cpptMode !== "multi";
+  const nextIndex = state.cpptSources.length + 1;
+  const accessText = state.cpptMode === "multi" ? `Akses CPPT ${nextIndex}` : "Akses CPPT";
+  if (aksesBtn) {
+    aksesBtn.dataset.defaultText = accessText;
+    aksesBtn.textContent = accessText;
+    aksesBtn.classList.remove("btn-success", "btn-error", "btn-outline");
+    aksesBtn.classList.add("btn-primary");
+  }
+  if (extractBtn) {
+    const canProcess =
+      state.cpptMode === "multi" ? state.cpptSources.length >= 2 : Boolean(state.cpptText);
+    extractBtn.hidden = !canProcess;
+    extractBtn.disabled = !canProcess;
+    extractBtn.classList.remove("btn-primary", "btn-success", "btn-error");
+    extractBtn.classList.add("btn-outline");
+  }
+  renderCpptSourceList();
+  if (state.cpptMode === "multi" && state.cpptSources.length === 1) {
+    updateCpptRoomStatus("CPPT diakses. Silakan pindah ke ruangan berikutnya, lalu tekan Akses CPPT 2.");
+  } else if (state.cpptMode === "multi" && state.cpptSources.length > 1) {
+    updateCpptRoomStatus("CPPT beberapa ruangan sudah digabung. Anda masih dapat akses ruangan berikutnya bila ada.");
+  } else {
+    updateCpptRoomStatus("");
+  }
+}
+
+function resetCpptAccessState() {
+  state.cpptText = "";
+  state.cpptSummary = null;
+  state.cpptSources = [];
+  clearCpptResultFields();
+  $("#cpptStatus").hidden = true;
+  $("#cpptStatus").textContent = "";
+  $("#cpptProgress").hidden = true;
+  $("#cpptProgressBar").style.width = "0%";
+  renderCpptAccessSummary(null);
+  renderCpptSourceList();
+  updateCarePeriodNote(null);
+  updateCpptRoomStatus("");
+  updateCpptControls();
+}
+
+function returnToCpptModeStep() {
+  const hasData =
+    state.cpptSources.length > 0 || Boolean(state.cpptText) || Boolean(state.cpptResultReady);
+  if (hasData && !window.confirm("Data CPPT yang sudah diakses akan dihapus. Lanjutkan?")) {
+    return;
+  }
+  state.cpptMode = "";
+  resetCpptAccessState();
 }
 
 function updateCarePeriodNote(summary) {
@@ -1496,6 +1779,14 @@ function normalizeAdminProviderKey(value) {
 
 function getAdminProviderMeta(provider) {
   return state.adminProviders.find((item) => item.provider === provider) || null;
+}
+
+function getProviderEndpoint(provider, baseUrl = "") {
+  return provider === "custom" ? baseUrl : PROVIDERS[provider]?.url || baseUrl;
+}
+
+function getProviderDisplay(provider, customLabel = "") {
+  return getProviderLabel(provider, customLabel || (provider === "custom" ? "Provider Lain" : ""));
 }
 
 function renderAdminProviderOptions(providers = [], activeProvider = "gemini") {
@@ -1628,8 +1919,8 @@ async function callGeminiForPenunjangPdf({ apiKey, model, files }) {
   return parseJsonResponse(data?.candidates?.[0]?.content?.parts?.[0]?.text).penunjang || "";
 }
 
-async function callOpenAiCompatibleForPenunjang({ provider, apiKey, model, parsedDocs }) {
-  const endpoint = PROVIDERS[provider]?.url;
+async function callOpenAiCompatibleForPenunjang({ provider, apiKey, model, parsedDocs, baseUrl = "", providerLabel = "" }) {
+  const endpoint = getProviderEndpoint(provider, baseUrl);
   if (!endpoint) throw new Error("Provider tidak dikenal: " + provider);
   const body = {
     model,
@@ -1655,7 +1946,7 @@ async function callOpenAiCompatibleForPenunjang({ provider, apiKey, model, parse
   });
   if (!res.ok) {
     const errText = await res.text();
-    throw new Error(`${PROVIDERS[provider].label} API ${res.status}: ${errText.slice(0, 200)}`);
+    throw new Error(`${getProviderDisplay(provider, providerLabel)} API ${res.status}: ${errText.slice(0, 200)}`);
   }
   const data = await res.json();
   return parseJsonResponse(data?.choices?.[0]?.message?.content).penunjang || "";
@@ -1680,8 +1971,8 @@ async function validateGeminiKey({ apiKey, model }) {
   await res.json();
 }
 
-async function validateOpenAiCompatibleKey({ provider, apiKey, model }) {
-  const endpoint = PROVIDERS[provider]?.url;
+async function validateOpenAiCompatibleKey({ provider, apiKey, model, baseUrl = "", providerLabel = "" }) {
+  const endpoint = getProviderEndpoint(provider, baseUrl);
   if (!endpoint) throw new Error("Provider tidak dikenal: " + provider);
   const res = await fetch(endpoint, {
     method: "POST",
@@ -1698,7 +1989,7 @@ async function validateOpenAiCompatibleKey({ provider, apiKey, model }) {
   });
   if (!res.ok) {
     const errText = await res.text();
-    throw new Error(`${PROVIDERS[provider].label} API ${res.status}: ${errText.slice(0, 160)}`);
+    throw new Error(`${getProviderDisplay(provider, providerLabel)} API ${res.status}: ${errText.slice(0, 160)}`);
   }
   await res.json();
 }
@@ -1707,12 +1998,14 @@ function syncSettingsFields(provider, modelValue) {
   const isGemini = provider === "gemini";
   const modelInput = $("#model");
   const fallbackFields = $("#geminiFallbackFields");
+  const customFields = $("#personalCustomProviderFields");
   // update API key label text
   const apiKeyField = $("#apiKey").closest(".field");
   if (apiKeyField) {
-    apiKeyField.querySelector(".label").textContent = getProviderLabel(provider) + " API Key";
+    apiKeyField.querySelector(".label").textContent = getProviderDisplay(provider, $("#customProviderLabel")?.value.trim()) + " API Key";
   }
   if (fallbackFields) fallbackFields.hidden = isGemini;
+  if (customFields) customFields.hidden = provider !== "custom";
   if (modelInput) modelInput.value = modelValue || (isGemini ? "gemini-2.0-flash" : "");
 }
 
@@ -1723,7 +2016,7 @@ function syncApiKeySourceFields() {
   const adminAccessPanel = $("#adminUserAccessPanel");
   if (personalGroup) personalGroup.hidden = useAdmin;
   if (adminAccessPanel) adminAccessPanel.hidden = !useAdmin;
-  ["provider", "apiKey", "model", "geminiFallbackApiKey", "geminiFallbackModel", "validateApiKey"].forEach((id) => {
+  ["provider", "apiKey", "model", "customProviderLabel", "customBaseUrl", "geminiFallbackApiKey", "geminiFallbackModel"].forEach((id) => {
     const el = $("#" + id);
     if (el) el.disabled = useAdmin;
   });
@@ -1744,6 +2037,8 @@ async function loadSettings() {
     apiKey = "",
     model = "gemini-2.0-flash",
     provider = "gemini",
+    customProviderLabel = "",
+    customBaseUrl = "",
     geminiFallbackApiKey = "",
     geminiFallbackModel = "gemini-2.0-flash",
   } = await chrome.storage.local.get([
@@ -1751,17 +2046,22 @@ async function loadSettings() {
     "apiKey",
     "model",
     "provider",
+    "customProviderLabel",
+    "customBaseUrl",
     "geminiFallbackApiKey",
     "geminiFallbackModel",
   ]);
   $("#apiKeySource").value = apiKeySource;
   $("#apiKey").value = apiKey;
   $("#provider").value = provider;
+  $("#customProviderLabel").value = customProviderLabel;
+  $("#customBaseUrl").value = customBaseUrl;
   $("#geminiFallbackApiKey").value = geminiFallbackApiKey;
   $("#geminiFallbackModel").value = geminiFallbackModel;
   syncSettingsFields(provider, model);
   syncApiKeySourceFields();
   await refreshAdminAccessUi();
+  await renderActiveApiKeyStatus();
 }
 loadSettings();
 
@@ -1769,11 +2069,18 @@ $("#provider").addEventListener("change", () => {
   syncSettingsFields($("#provider").value, $("#model").value.trim());
 });
 
+$("#customProviderLabel").addEventListener("input", () => {
+  if ($("#provider").value === "custom") {
+    syncSettingsFields("custom", $("#model").value.trim());
+  }
+});
+
 $("#apiKeySource").addEventListener("change", async () => {
   syncApiKeySourceFields();
   if ($("#apiKeySource").value === "admin") {
     await refreshAdminAccessUi();
   }
+  await renderActiveApiKeyStatus();
 });
 
 $("#adminProvider").addEventListener("change", () => {
@@ -1788,74 +2095,120 @@ function getCurrentModel() {
   return $("#model").value.trim();
 }
 
-$("#saveSettings").addEventListener("click", async () => {
-  const apiKeySource = $("#apiKeySource").value;
+function collectPersonalAiForm() {
   const provider = $("#provider").value;
-  const model = getCurrentModel();
-  if (apiKeySource === "personal" && !model) {
+  const customLabel = $("#customProviderLabel").value.trim();
+  return {
+    apiKeySource: $("#apiKeySource").value,
+    apiKey: $("#apiKey").value.trim(),
+    model: getCurrentModel(),
+    provider,
+    customProviderLabel: customLabel,
+    customBaseUrl: $("#customBaseUrl").value.trim(),
+    geminiFallbackApiKey: $("#geminiFallbackApiKey").value.trim(),
+    geminiFallbackModel: $("#geminiFallbackModel").value.trim() || "gemini-2.0-flash",
+  };
+}
+
+async function validatePersonalAiConfig(config, status) {
+  if (!config.apiKey || !config.model) {
+    throw new Error("API key dan model utama wajib diisi.");
+  }
+  if (config.provider === "custom" && (!config.customProviderLabel || !config.customBaseUrl)) {
+    throw new Error("Nama provider dan endpoint URL wajib diisi untuk Provider Lain.");
+  }
+  const label = getProviderDisplay(config.provider, config.customProviderLabel);
+  status.hidden = false;
+  status.className = "status is-loading";
+  status.textContent = `Memvalidasi ${label}...`;
+  if (config.provider === "gemini") {
+    await validateGeminiKey({ apiKey: config.apiKey, model: config.model });
+    return `${label} aktif.`;
+  }
+  await validateOpenAiCompatibleKey({
+    provider: config.provider,
+    apiKey: config.apiKey,
+    model: config.model,
+    baseUrl: config.customBaseUrl,
+    providerLabel: config.customProviderLabel,
+  });
+  if (config.geminiFallbackApiKey) {
+    status.textContent = `${label} aktif. Memvalidasi Gemini fallback...`;
+    await validateGeminiKey({
+      apiKey: config.geminiFallbackApiKey,
+      model: config.geminiFallbackModel,
+    });
+    return `${label} aktif. Gemini fallback aktif.`;
+  }
+  return `${label} aktif. Gemini fallback belum diisi.`;
+}
+
+$("#saveSettings").addEventListener("click", async () => {
+  const status = $("#settingsStatus");
+  const config = collectPersonalAiForm();
+  if (config.apiKeySource !== "personal") {
+    status.hidden = false;
+    status.className = "status is-loading";
+    status.textContent = "Memeriksa akses API key admin...";
+    const session = await validateStoredAdminUserSession();
+    if (!session) {
+      status.className = "status is-error";
+      status.textContent =
+        "Login akses admin terlebih dahulu untuk memakai API key admin. Silakan isi username dan password, lalu tekan Login Akses Admin. Jika belum memiliki username dan password, Silakan hubungi dr. Yunizar";
+      toast("Login akses admin diperlukan", "error");
+      await refreshAdminAccessUi();
+      return;
+    }
+    await chrome.storage.local.set({ apiKeySource: "admin" });
+    status.className = "status is-success";
+    status.textContent = "API key admin siap digunakan.";
+    toast("API key admin siap digunakan", "success");
+    await renderActiveApiKeyStatus();
+    return;
+  }
+  if (config.apiKeySource === "personal" && !config.model) {
+    status.hidden = false;
+    status.className = "status is-error";
+    status.textContent = "Model wajib diisi.";
     toast("Model wajib diisi", "error");
     return;
   }
-  await chrome.storage.local.set({
-    apiKeySource,
-    apiKey: $("#apiKey").value.trim(),
-    model,
-    provider,
-    geminiFallbackApiKey: $("#geminiFallbackApiKey").value.trim(),
-    geminiFallbackModel: $("#geminiFallbackModel").value.trim() || "gemini-2.0-flash",
-  });
-  toast("Pengaturan disimpan", "success");
-});
-
-$("#validateApiKey").addEventListener("click", async () => {
-  const button = $("#validateApiKey");
-  const status = $("#settingsStatus");
-  const provider = $("#provider").value;
-  const model = getCurrentModel();
-  const apiKey = $("#apiKey").value.trim();
-  const fallbackKey = $("#geminiFallbackApiKey").value.trim();
-  const fallbackModel = $("#geminiFallbackModel").value.trim() || "gemini-2.0-flash";
-
-  if (!apiKey || !model) {
+  if (config.provider === "custom" && (!config.customProviderLabel || !config.customBaseUrl)) {
     status.hidden = false;
     status.className = "status is-error";
-    status.textContent = "API key dan model utama wajib diisi.";
-    toast("API key/model belum lengkap", "error");
+    status.textContent = "Nama provider dan endpoint URL wajib diisi untuk Provider Lain.";
+    toast("Provider Lain belum lengkap", "error");
     return;
   }
-
-  button.disabled = true;
-  status.hidden = false;
-  status.className = "status is-loading";
-  status.textContent = `Memvalidasi ${PROVIDERS[provider]?.label || provider}...`;
-
+  const saveMode = await askApiKeySaveMode();
+  if (saveMode === "cancel") {
+    status.hidden = false;
+    status.className = "status";
+    status.textContent = "API key tidak disimpan. Pengaturan lama tetap digunakan.";
+    toast("API key tidak disimpan", "error");
+    return;
+  }
   try {
-    if (provider === "gemini") {
-      await validateGeminiKey({ apiKey, model });
-      status.className = "status";
-      status.textContent = "Gemini API key aktif.";
-      toast("API key aktif", "success");
-      return;
+    let validationMessage = "";
+    if (config.apiKeySource === "personal" && saveMode === "validate") {
+      validationMessage = await validatePersonalAiConfig(config, status);
     }
-
-    await validateOpenAiCompatibleKey({ provider, apiKey, model });
-    if (fallbackKey) {
-      status.textContent = `${PROVIDERS[provider]?.label || provider} aktif. Memvalidasi Gemini fallback...`;
-      await validateGeminiKey({ apiKey: fallbackKey, model: fallbackModel });
-      status.className = "status";
-      status.textContent = `${PROVIDERS[provider]?.label || provider} aktif. Gemini fallback aktif.`;
-    } else {
-      status.className = "status";
-      status.textContent = `${PROVIDERS[provider]?.label || provider} aktif. Gemini fallback belum diisi.`;
-    }
-    toast("Validasi selesai", "success");
+    await chrome.storage.local.set({
+      ...config,
+      personalApiKeyValidated: saveMode === "validate",
+      personalApiKeyValidatedAt: saveMode === "validate" ? new Date().toISOString() : "",
+      personalApiKeyProviderLabel: getProviderDisplay(config.provider, config.customProviderLabel),
+    });
+    status.hidden = false;
+    status.className = "status is-success";
+    status.textContent = validationMessage || "API key tersimpan tanpa validasi.";
+    toast(validationMessage || "Pengaturan disimpan", "success");
+    await renderActiveApiKeyStatus();
   } catch (e) {
     console.error(e);
     status.className = "status is-error";
-    status.textContent = "Validasi gagal: " + e.message;
-    toast("Validasi gagal", "error");
-  } finally {
-    button.disabled = false;
+    status.textContent = `Validasi gagal: ${e.message}. API key tidak tersimpan.`;
+    toast("API key tidak tersimpan", "error");
   }
 });
 
@@ -1911,7 +2264,7 @@ async function loadAdminAiConfig() {
   applyAdminProviderSelection($("#adminProvider").value, $("#adminModel").value.trim());
 }
 
-$("#knowledgeLogin").addEventListener("click", async () => {
+async function handleKnowledgeAdminLogin() {
   const status = $("#knowledgeStatus");
   const credentials = {
     username: $("#knowledgeAdminUser").value.trim(),
@@ -1935,6 +2288,16 @@ $("#knowledgeLogin").addEventListener("click", async () => {
     status.className = "status is-error";
     status.textContent = "Login gagal: " + e.message;
   }
+}
+
+$("#knowledgeLogin").addEventListener("click", handleKnowledgeAdminLogin);
+
+["knowledgeAdminUser", "knowledgeAdminPassword"].forEach((id) => {
+  $("#" + id)?.addEventListener("keydown", (event) => {
+    if (event.key !== "Enter") return;
+    event.preventDefault();
+    handleKnowledgeAdminLogin();
+  });
 });
 
 $("#loginAdminAccess").addEventListener("click", async () => {
@@ -1968,6 +2331,7 @@ $("#loginAdminAccess").addEventListener("click", async () => {
     status.className = "status is-success";
     status.textContent = "Akses API key admin aktif.";
     await refreshAdminAccessUi();
+    await renderActiveApiKeyStatus();
   } catch (e) {
     status.hidden = false;
     status.className = "status is-error";
@@ -1994,37 +2358,7 @@ $("#logoutAdminAccess").addEventListener("click", async () => {
   status.hidden = false;
   status.className = "status";
   status.textContent = "Akses API key admin telah keluar.";
-});
-
-$("#validateAdminApiKey").addEventListener("click", async () => {
-  const status = $("#knowledgeStatus");
-  let config;
-  try {
-    config = collectAdminAiForm();
-    if ($("#adminProvider").value === "custom" && !config.provider) {
-      throw new Error("Nama provider custom wajib diisi");
-    }
-  } catch (e) {
-    status.hidden = false;
-    status.className = "status is-error";
-    status.textContent = e.message;
-    return;
-  }
-  status.hidden = false;
-  status.className = "status is-loading";
-  status.textContent = `Memvalidasi ${getProviderLabel(config.provider, config.provider_label)}...`;
-  try {
-    await knowledgeApi("validate_ai_config", {
-      ...getKnowledgeAuth(),
-      config,
-    });
-    status.className = "status is-success";
-    status.textContent = `${getProviderLabel(config.provider, config.provider_label)} aktif.`;
-    toast("API key admin aktif", "success");
-  } catch (e) {
-    status.className = "status is-error";
-    status.textContent = "Validasi admin gagal: " + e.message;
-  }
+  await renderActiveApiKeyStatus();
 });
 
 $("#saveAdminApiKey").addEventListener("click", async () => {
@@ -2035,16 +2369,34 @@ $("#saveAdminApiKey").addEventListener("click", async () => {
     if ($("#adminProvider").value === "custom" && !config.provider) {
       throw new Error("Nama provider custom wajib diisi");
     }
+    if ($("#adminProvider").value === "custom" && !config.base_url) {
+      throw new Error("Endpoint URL provider custom wajib diisi");
+    }
   } catch (e) {
     status.hidden = false;
     status.className = "status is-error";
     status.textContent = e.message;
     return;
   }
-  status.hidden = false;
-  status.className = "status is-loading";
-  status.textContent = "Menyimpan API key admin...";
+  const providerLabel = getProviderLabel(config.provider, config.provider_label);
+  const saveMode = await askApiKeySaveMode();
+  if (saveMode === "cancel") {
+    status.className = "status";
+    status.textContent = "API key admin tidak disimpan. Pengaturan lama tetap digunakan.";
+    toast("API key admin tidak disimpan", "error");
+    return;
+  }
   try {
+    status.hidden = false;
+    status.className = "status is-loading";
+    if (saveMode === "validate") {
+      status.textContent = `Memvalidasi ${providerLabel}...`;
+      await knowledgeApi("validate_ai_config", {
+        ...getKnowledgeAuth(),
+        config,
+      });
+    }
+    status.textContent = "Menyimpan API key admin...";
     const data = await knowledgeApi("save_ai_config", {
       ...getKnowledgeAuth(),
       config,
@@ -2061,11 +2413,16 @@ $("#saveAdminApiKey").addEventListener("click", async () => {
       data.config?.geminiFallbackModel || config.gemini_fallback_model || "gemini-2.0-flash";
     applyAdminProviderSelection($("#adminProvider").value, $("#adminModel").value.trim());
     status.className = "status is-success";
-    status.textContent = "API key admin tersimpan. User dapat memakai sumber API key admin.";
-    toast("API key admin tersimpan", "success");
+    status.textContent = saveMode === "validate"
+      ? `${providerLabel} aktif. API key admin tersimpan.`
+      : "API key admin tersimpan tanpa validasi.";
+    toast(status.textContent, "success");
+    await renderActiveApiKeyStatus();
   } catch (e) {
     status.className = "status is-error";
-    status.textContent = "Gagal simpan API key admin: " + e.message;
+    status.textContent = saveMode === "validate"
+      ? `Validasi admin gagal: ${e.message}. API key tidak tersimpan.`
+      : "Gagal simpan API key admin: " + e.message;
   }
 });
 
@@ -2106,6 +2463,7 @@ $("#resetAdminApiKey").addEventListener("click", async () => {
     status.className = "status is-success";
     status.textContent = "API key admin berhasil dikosongkan. Silakan isi API key baru.";
     toast("API key admin direset", "success");
+    await renderActiveApiKeyStatus();
   } catch (e) {
     status.className = "status is-error";
     status.textContent = "Reset API key admin gagal: " + e.message;
@@ -2388,6 +2746,25 @@ insertSOButton.addEventListener("click", async () => {
 // ---------------- CPPT: Akses ----------------
 const aksesBtn = $("#aksesCPPT");
 const extractBtn = $("#extractCPPT");
+const cpptModeSingleBtn = $("#cpptModeSingle");
+const cpptModeMultiBtn = $("#cpptModeMulti");
+const cpptModeBackBtn = $("#cpptModeBack");
+
+cpptModeSingleBtn?.addEventListener("click", () => {
+  state.cpptMode = "single";
+  resetCpptAccessState();
+});
+
+cpptModeMultiBtn?.addEventListener("click", () => {
+  state.cpptMode = "multi";
+  resetCpptAccessState();
+});
+
+cpptModeBackBtn?.addEventListener("click", () => {
+  returnToCpptModeStep();
+});
+
+updateCpptControls();
 
 aksesBtn.addEventListener("click", async () => {
   try {
@@ -2448,12 +2825,39 @@ aksesBtn.addEventListener("click", async () => {
       toast("Pastikan sudah berada di halaman CPPT Ruangan", "error");
       return;
     }
-    state.cpptText = result.text;
-    state.cpptSummary = summarizeCpptTable(result.table, result.text);
+    clearCpptResultFields();
+    const source = makeCpptSource(result, state.cpptSources.length + 1);
+    if (state.cpptMode === "multi") {
+      const duplicate = state.cpptSources.some((item) => item.id === source.id);
+      if (duplicate) {
+        toast("CPPT ruangan ini sudah pernah diakses", "error");
+        return;
+      }
+      state.cpptSources.push(source);
+      combineCpptSources();
+    } else {
+      state.cpptSources = [source];
+      state.cpptText = result.text;
+      state.cpptSummary = source.summary;
+    }
     renderCpptAccessSummary(state.cpptSummary);
     updateCarePeriodNote(state.cpptSummary);
-    setButtonState(aksesBtn, "success", "✓ CPPT Diakses", { duration: 3000 });
-    extractBtn.disabled = false;
+    renderCpptSourceList();
+    const nextText =
+      state.cpptMode === "multi" ? `Akses CPPT ${state.cpptSources.length + 1}` : "Akses CPPT";
+    aksesBtn.dataset.defaultText = nextText;
+    setButtonState(aksesBtn, "success", "CPPT diakses", { duration: 3000 });
+    const canProcess =
+      state.cpptMode === "multi" ? state.cpptSources.length >= 2 : Boolean(state.cpptText);
+    extractBtn.hidden = !canProcess;
+    extractBtn.disabled = !canProcess;
+    extractBtn.classList.remove("btn-primary", "btn-success", "btn-error");
+    extractBtn.classList.add("btn-outline");
+    if (state.cpptMode === "multi" && state.cpptSources.length === 1) {
+      updateCpptRoomStatus("CPPT diakses. Silakan pindah ke ruangan berikutnya, lalu tekan Akses CPPT 2.");
+    } else if (state.cpptMode === "multi" && state.cpptSources.length > 1) {
+      updateCpptRoomStatus("CPPT beberapa ruangan sudah digabung. Anda masih dapat akses ruangan berikutnya bila ada.");
+    }
     toast("CPPT berhasil di akses", "success");
   } catch (e) {
     console.error(e);
@@ -2468,6 +2872,10 @@ extractBtn.addEventListener("click", async () => {
     toast("Akses CPPT terlebih dahulu", "error");
     return;
   }
+  if (state.cpptMode === "multi" && state.cpptSources.length < 2) {
+    toast("Akses CPPT minimal 2 ruangan terlebih dahulu", "error");
+    return;
+  }
 
   const status = $("#cpptStatus");
   const progress = createAiProgress({
@@ -2475,9 +2883,10 @@ extractBtn.addEventListener("click", async () => {
     bar: $("#cpptProgressBar"),
     text: $("#cpptProgressText"),
     status,
+    mirrorLoadingToStatus: false,
   });
-  status.hidden = false;
-  status.className = "status is-loading";
+  status.hidden = true;
+  status.textContent = "";
   extractBtn.disabled = true;
 
   const systemPrompt =
@@ -2531,7 +2940,7 @@ Berikan output untuk: Pemeriksaan Penunjang Bermakna, Terapi Selama Dirawat, Ope
     await progress.setProgress("Menyiapkan CPPT...", 10);
     const ai = await getEffectiveAiSettings();
     await progress.setProgress(
-      `Memproses dengan ${ai.source === "admin" ? "API key admin" : PROVIDERS[ai.provider]?.label || ai.provider}...`,
+      `Memproses dengan ${ai.source === "admin" ? "API key admin" : getProviderDisplay(ai.provider, ai.providerLabel)}...`,
       25
     );
     const userMsg =
@@ -2575,8 +2984,7 @@ Berikan output untuk: Pemeriksaan Penunjang Bermakna, Terapi Selama Dirawat, Ope
       const data = await res.json();
       text = data?.candidates?.[0]?.content?.parts?.[0]?.text;
     } else {
-      // OpenAI-compatible: Sumopod, AImurah
-      const endpoint = PROVIDERS[ai.provider]?.url;
+      const endpoint = getProviderEndpoint(ai.provider, ai.baseUrl);
       if (!endpoint) throw new Error("Provider tidak dikenal: " + ai.provider);
       const body = {
         model: ai.model,
@@ -2608,7 +3016,8 @@ Berikan output untuk: Pemeriksaan Penunjang Bermakna, Terapi Selama Dirawat, Ope
     const parsed = parseJsonResponse(text);
     const normalized = normalizeCpptResult(parsed);
 
-    $("#cpptResults").hidden = false;
+    state.cpptResultReady = true;
+    updateCpptControls();
     $$("#cpptResults textarea").forEach((ta) => {
       ta.value = normalized[ta.dataset.key] ?? "";
     });
@@ -2629,7 +3038,7 @@ Berikan output untuk: Pemeriksaan Penunjang Bermakna, Terapi Selama Dirawat, Ope
     progress.fail(getAiErrorMessage(e, "Proses CPPT dengan AI"));
     toast("Gagal extract", "error");
   } finally {
-    extractBtn.disabled = false;
+    updateCpptControls();
   }
 });
 
@@ -2862,23 +3271,26 @@ summarizePenunjangBtn.addEventListener("click", async () => {
       try {
         await progress.setProgress("Mencoba parser lokal PDF.js...", 35);
         const parsedDocs = await parsePenunjangFilesWithPdfJs(state.penunjangFiles);
-        await progress.setProgress(`PDF berhasil diekstrak. Merangkum dengan ${PROVIDERS[ai.provider]?.label || ai.provider}...`, 60);
+        const providerLabel = getProviderDisplay(ai.provider, ai.providerLabel);
+        await progress.setProgress(`PDF berhasil diekstrak. Merangkum dengan ${providerLabel}...`, 60);
         progress.startWaiting("Menunggu respons AI penunjang");
         summary = await callOpenAiCompatibleForPenunjang({
           provider: ai.provider,
           apiKey: ai.apiKey,
           model: ai.model,
           parsedDocs,
+          baseUrl: ai.baseUrl,
+          providerLabel: ai.providerLabel,
         });
         progress.stop();
       } catch (primaryError) {
         progress.stop();
         if (!ai.geminiFallbackApiKey) {
           throw new Error(
-            `${PROVIDERS[ai.provider]?.label || ai.provider}/parser gagal: ${primaryError.message}. Gemini API fallback belum diisi.`
+            `${getProviderDisplay(ai.provider, ai.providerLabel)}/parser gagal: ${primaryError.message}. Gemini API fallback belum diisi.`
           );
         }
-        await progress.setProgress(`Gagal menggunakan ${PROVIDERS[ai.provider]?.label || ai.provider}/parser. Melanjutkan dengan Gemini API fallback...`, 68);
+        await progress.setProgress(`Gagal menggunakan ${getProviderDisplay(ai.provider, ai.providerLabel)}/parser. Melanjutkan dengan Gemini API fallback...`, 68);
         progress.startWaiting("Menunggu respons Gemini fallback");
         summary = await callGeminiForPenunjangPdf({
           apiKey: ai.geminiFallbackApiKey,
@@ -2903,20 +3315,8 @@ summarizePenunjangBtn.addEventListener("click", async () => {
 });
 
 // ---------------- CPPT: Masukkan Detail ke halaman ----------------
-const insertCPPTConfirm = $("#insertCPPTConfirm");
-const confirmInsertCPPT = $("#confirmInsertCPPT");
-const cancelInsertCPPT = $("#cancelInsertCPPT");
-
-$("#insertCPPT").addEventListener("click", () => {
-  insertCPPTConfirm.hidden = false;
-});
-
-cancelInsertCPPT.addEventListener("click", () => {
-  insertCPPTConfirm.hidden = true;
-});
-
-confirmInsertCPPT.addEventListener("click", async () => {
-  insertCPPTConfirm.hidden = true;
+$("#insertCPPT").addEventListener("click", async () => {
+  if (!window.confirm("Apakah semua data sudah benar?")) return;
   const getVal = (key) =>
     document.querySelector(`#cpptResults textarea[data-key="${key}"]`)?.value ?? "";
   const payload = {
@@ -2956,7 +3356,7 @@ confirmInsertCPPT.addEventListener("click", async () => {
     });
     const missing = Object.entries(result).filter(([, ok]) => !ok).map(([k]) => k);
     if (missing.length === 0) toast("Detail CPPT dimasukkan", "success");
-    else toast("Sebagian field tidak ditemukan: " + missing.join(", "), "error");
+    else toast("Pastikan anda sudah berada di Halaman Pengeditan Resume Medis", "error");
   } catch (e) {
     console.error(e);
     toast("Gagal: " + e.message, "error");
@@ -3039,7 +3439,14 @@ $("#analyzeClaimBpjs").addEventListener("click", async () => {
     const analysis =
       ai.source === "admin"
         ? await callAdminAiText({ prompt, responseJson: true, userSession: ai.adminUserSession })
-        : await callProviderText({ provider: ai.provider, apiKey: ai.apiKey, model: ai.model, prompt });
+        : await callProviderText({
+            provider: ai.provider,
+            apiKey: ai.apiKey,
+            model: ai.model,
+            prompt,
+            baseUrl: ai.baseUrl,
+            providerLabel: ai.providerLabel,
+          });
     if (!analysis.trim()) throw new Error("Respons analisa kosong dari provider");
 
     progressCtl.stop();

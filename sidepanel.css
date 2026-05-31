@@ -18,6 +18,10 @@
 
 * { box-sizing: border-box; }
 
+[hidden] {
+  display: none !important;
+}
+
 html, body {
   margin: 0;
   padding: 0;
@@ -130,14 +134,58 @@ body.is-admin-mode .settings-button {
   padding-top: 0;
 }
 .settings-group[hidden] { display: none; }
+.active-apikey-box {
+  border: 1px solid var(--cloud-gray);
+  border-radius: 9px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px;
+}
+.active-apikey-status {
+  border-radius: 9px;
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1.35;
+  padding: 8px 10px;
+}
+.active-apikey-status.is-error {
+  background: #fee2e2;
+  color: #b91c1c;
+}
+.active-apikey-status.is-success {
+  background: #dcfce7;
+  color: var(--success);
+}
+.active-apikey-status.is-warning {
+  background: #fef3c7;
+  color: #92400e;
+}
 .settings-main.is-admin-source #personalApiSettings {
   display: none;
 }
-.settings-main.is-admin-source #validateApiKey {
+.settings-main.is-admin-source #personalApiDetails {
   display: none;
 }
 .settings-main:not(.is-admin-source) #adminUserAccessPanel {
   display: none;
+}
+.collapsible {
+  border-top: 1px solid var(--cloud-gray);
+  padding-top: 12px;
+}
+.collapsible summary {
+  color: var(--ink-solid);
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 700;
+  list-style-position: outside;
+}
+.collapsible-body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding-top: 12px;
 }
 .admin-panel {
   display: flex;
@@ -246,11 +294,6 @@ body.is-admin-mode .settings-button {
   border: 1px solid var(--cloud-gray);
 }
 .btn-outline:not(:disabled):hover { border-color: var(--ink-solid); }
-.btn-small {
-  font-size: 12px;
-  padding: 7px 10px;
-}
-
 .btn-success {
   background: var(--success);
   color: var(--canvas-white);
@@ -268,6 +311,13 @@ body.is-admin-mode .settings-button {
   padding: 10px 12px;
   border-radius: 9px;
   margin: 0;
+}
+
+.insert-guide {
+  color: var(--subtle-gray);
+  font-size: 12px;
+  margin: 2px 0 0;
+  text-align: center;
 }
 
 .status {
@@ -395,6 +445,52 @@ body.is-admin-mode .settings-button {
   gap: 8px;
 }
 
+.insert-bottom {
+  border-top: 1px solid var(--cloud-gray);
+  margin-top: 8px;
+  padding-top: 12px;
+}
+
+.cppt-workflow-header {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.cppt-workflow {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.cppt-actions {
+  gap: 10px;
+}
+
+.cppt-actions .btn {
+  min-height: 44px;
+  width: 100%;
+}
+
+.cppt-summary {
+  line-height: 1.55;
+  padding: 12px 14px;
+}
+
+#cpptProgress {
+  margin-top: 2px;
+}
+
+#cpptProgress .progress-text {
+  line-height: 1.45;
+}
+
+.btn-small {
+  font-size: 12px;
+  min-height: 30px;
+  padding: 6px 10px;
+  width: auto;
+}
+
 .confirm-box {
   border: 1px solid var(--cloud-gray);
   border-radius: 9px;
@@ -498,3 +594,29 @@ body.is-admin-mode .settings-button {
 }
 .toast.is-success { background: var(--success); }
 .toast.is-error { background: #b91c1c; }
+
+.full-panel-modal {
+  align-items: center;
+  background: rgba(255, 255, 255, 0.96);
+  display: flex;
+  inset: 0;
+  justify-content: center;
+  padding: 20px;
+  position: fixed;
+  z-index: 1000;
+}
+
+.full-panel-dialog {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  max-width: 360px;
+  width: 100%;
+}
+
+.modal-message {
+  color: var(--subtle-gray);
+  font-size: 14px;
+  line-height: 1.55;
+  margin: 10px 0 0;
+}

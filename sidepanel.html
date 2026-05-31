@@ -24,6 +24,10 @@
       <!-- SETTING -->
       <section class="panel" data-panel="setting" hidden>
         <div id="settingsMain" class="settings-main">
+        <div class="active-apikey-box">
+          <span class="label">Apikey Aktif</span>
+          <div id="activeApiKeyStatus" class="active-apikey-status is-error">Tidak ada apikey aktif</div>
+        </div>
         <label class="field">
           <span class="label">Sumber API Key</span>
           <select id="apiKeySource" class="input">
@@ -51,55 +55,72 @@
           </div>
           <div id="adminUserAccessStatus" class="status" hidden></div>
         </div>
-        <div id="personalApiSettings" class="settings-group settings-group-personal">
-          <label class="field">
-            <span class="label">Provider</span>
-            <select id="provider" class="input">
-              <option value="gemini">Gemini (Google)</option>
-              <option value="sumopod">Sumopod</option>
-              <option value="aimurah">AImurah</option>
-            </select>
-          </label>
-          <label class="field">
-            <span class="label">API Key</span>
-            <input id="apiKey" type="password" class="input" placeholder="AIza..." autocomplete="off" />
-            <span class="hint">API key provider utama. Disimpan lokal di browser Anda.</span>
-          </label>
-          <label class="field">
-            <span class="label">Model</span>
-            <input id="model" type="text" class="input" placeholder="contoh: gemini-2.0-flash, gpt-4o-mini, dll" autocomplete="off" />
-            <span class="hint">Isi manual sesuai model provider.</span>
-          </label>
-          <div id="geminiFallbackFields" class="settings-group" hidden>
+        <details id="personalApiDetails" class="collapsible settings-group settings-group-personal" open>
+          <summary>Pengaturan API Key Pribadi</summary>
+          <div id="personalApiSettings" class="collapsible-body">
             <label class="field">
-              <span class="label">Gemini API Key Fallback</span>
-              <input id="geminiFallbackApiKey" type="password" class="input" placeholder="AIza..." autocomplete="off" />
-              <span class="hint">Dipakai jika parser lokal/provider utama gagal membaca atau merangkum PDF.</span>
+              <span class="label">Provider</span>
+              <select id="provider" class="input">
+                <option value="gemini">Gemini (Google)</option>
+                <option value="sumopod">Sumopod</option>
+                <option value="aimurah">AImurah</option>
+                <option value="x5lab">X5Lab</option>
+                <option value="custom">Provider Lain</option>
+              </select>
+            </label>
+            <div id="personalCustomProviderFields" class="settings-group" hidden>
+              <label class="field">
+                <span class="label">Nama Provider</span>
+                <input id="customProviderLabel" type="text" class="input" placeholder="contoh: Genifty" autocomplete="off" />
+              </label>
+              <label class="field">
+                <span class="label">Endpoint URL</span>
+                <input id="customBaseUrl" type="text" class="input" placeholder="https://api.provider.com/v1/chat/completions" autocomplete="off" />
+                <span class="hint">Gunakan endpoint OpenAI-compatible chat/completions.</span>
+              </label>
+            </div>
+            <label class="field">
+              <span class="label">API Key</span>
+              <input id="apiKey" type="password" class="input" placeholder="AIza..." autocomplete="off" />
+              <span class="hint">API key provider utama. Disimpan lokal di browser Anda.</span>
             </label>
             <label class="field">
-              <span class="label">Model Gemini Fallback</span>
-              <input id="geminiFallbackModel" type="text" class="input" placeholder="contoh: gemini-2.0-flash" autocomplete="off" />
+              <span class="label">Model</span>
+              <input id="model" type="text" class="input" placeholder="contoh: gemini-2.0-flash, gpt-4o-mini, dll" autocomplete="off" />
+              <span class="hint">Isi manual sesuai model provider.</span>
             </label>
+            <div id="geminiFallbackFields" class="settings-group" hidden>
+              <label class="field">
+                <span class="label">Gemini API Key Fallback</span>
+                <input id="geminiFallbackApiKey" type="password" class="input" placeholder="AIza..." autocomplete="off" />
+                <span class="hint">Dipakai jika parser lokal/provider utama gagal membaca atau merangkum PDF.</span>
+              </label>
+              <label class="field">
+                <span class="label">Model Gemini Fallback</span>
+                <input id="geminiFallbackModel" type="text" class="input" placeholder="contoh: gemini-2.0-flash" autocomplete="off" />
+              </label>
+            </div>
           </div>
-        </div>
+        </details>
         <div class="action-row">
-          <button id="validateApiKey" class="btn btn-outline">Validasi API Key</button>
           <button id="saveSettings" class="btn btn-primary">Simpan</button>
         </div>
         <div id="settingsStatus" class="status" hidden></div>
 
-        <div class="settings-group">
-          <span class="label">Admin Knowledge BPJS</span>
-          <label class="field">
-            <span class="label">Username</span>
-            <input id="knowledgeAdminUser" type="text" class="input" placeholder="admin" autocomplete="off" />
-          </label>
-          <label class="field">
-            <span class="label">Password</span>
-            <input id="knowledgeAdminPassword" type="password" class="input" placeholder="Password admin" autocomplete="off" />
-          </label>
-          <button id="knowledgeLogin" class="btn btn-primary" type="button">Masuk Admin</button>
-        </div>
+        <details class="collapsible settings-group">
+          <summary>Admin Knowledge BPJS</summary>
+          <div class="collapsible-body">
+            <label class="field">
+              <span class="label">Username</span>
+              <input id="knowledgeAdminUser" type="text" class="input" placeholder="admin" autocomplete="off" />
+            </label>
+            <label class="field">
+              <span class="label">Password</span>
+              <input id="knowledgeAdminPassword" type="password" class="input" placeholder="Password admin" autocomplete="off" />
+            </label>
+            <button id="knowledgeLogin" class="btn btn-primary" type="button">Masuk Admin</button>
+          </div>
+        </details>
         </div>
 
         <div id="knowledgeAdminPanel" class="admin-panel" hidden>
@@ -117,48 +138,52 @@
           </nav>
 
           <div class="admin-section is-active" data-admin-panel="apikey">
-            <label class="field">
-              <span class="label">Provider Admin</span>
-              <select id="adminProvider" class="input">
-                <option value="gemini">Gemini (Google)</option>
-                <option value="sumopod">Sumopod</option>
-                <option value="aimurah">AImurah</option>
-                <option value="x5lab">X5Lab</option>
-                <option value="custom">Provider Lain</option>
-              </select>
-            </label>
-            <div id="adminCustomProviderFields" class="settings-group" hidden>
+            <details class="collapsible settings-group settings-group-personal" open>
+              <summary>Pengaturan API Key Admin</summary>
+              <div class="collapsible-body">
               <label class="field">
-                <span class="label">Nama Provider</span>
-                <input id="adminProviderLabel" type="text" class="input" placeholder="contoh: Genifty" autocomplete="off" />
-                <span class="hint">Nama ini akan dipakai sebagai identitas provider dan tampil di dropdown aplikasi ini.</span>
+                <span class="label">Provider Admin</span>
+                <select id="adminProvider" class="input">
+                  <option value="gemini">Gemini (Google)</option>
+                  <option value="sumopod">Sumopod</option>
+                  <option value="aimurah">AImurah</option>
+                  <option value="x5lab">X5Lab</option>
+                  <option value="custom">Provider Lain</option>
+                </select>
+              </label>
+              <div id="adminCustomProviderFields" class="settings-group" hidden>
+                <label class="field">
+                  <span class="label">Nama Provider</span>
+                  <input id="adminProviderLabel" type="text" class="input" placeholder="contoh: Genifty" autocomplete="off" />
+                  <span class="hint">Nama ini akan dipakai sebagai identitas provider dan tampil di dropdown aplikasi ini.</span>
+                </label>
+                <label class="field">
+                  <span class="label">Endpoint URL</span>
+                  <input id="adminBaseUrl" type="text" class="input" placeholder="https://api.provider.com/v1/chat/completions" autocomplete="off" />
+                  <span class="hint">Gunakan endpoint OpenAI-compatible chat/completions.</span>
+                </label>
+              </div>
+              <label class="field">
+                <span class="label">API Key Admin</span>
+                <input id="adminApiKey" type="password" class="input" placeholder="API key admin" autocomplete="off" />
               </label>
               <label class="field">
-                <span class="label">Endpoint URL</span>
-                <input id="adminBaseUrl" type="text" class="input" placeholder="https://api.provider.com/v1/chat/completions" autocomplete="off" />
-                <span class="hint">Gunakan endpoint OpenAI-compatible chat/completions.</span>
+                <span class="label">Model Admin</span>
+                <input id="adminModel" type="text" class="input" placeholder="gemini-2.0-flash / model provider" autocomplete="off" />
               </label>
-            </div>
-            <label class="field">
-              <span class="label">API Key Admin</span>
-              <input id="adminApiKey" type="password" class="input" placeholder="API key admin" autocomplete="off" />
-            </label>
-            <label class="field">
-              <span class="label">Model Admin</span>
-              <input id="adminModel" type="text" class="input" placeholder="gemini-2.0-flash / model provider" autocomplete="off" />
-            </label>
-            <div id="adminGeminiFallbackFields" class="settings-group" hidden>
-              <label class="field">
-                <span class="label">Gemini API Key Fallback Admin</span>
-                <input id="adminGeminiFallbackApiKey" type="password" class="input" placeholder="AIza..." autocomplete="off" />
-              </label>
-              <label class="field">
-                <span class="label">Model Gemini Fallback Admin</span>
-                <input id="adminGeminiFallbackModel" type="text" class="input" placeholder="gemini-2.0-flash" autocomplete="off" />
-              </label>
-            </div>
+              <div id="adminGeminiFallbackFields" class="settings-group" hidden>
+                <label class="field">
+                  <span class="label">Gemini API Key Fallback Admin</span>
+                  <input id="adminGeminiFallbackApiKey" type="password" class="input" placeholder="AIza..." autocomplete="off" />
+                </label>
+                <label class="field">
+                  <span class="label">Model Gemini Fallback Admin</span>
+                  <input id="adminGeminiFallbackModel" type="text" class="input" placeholder="gemini-2.0-flash" autocomplete="off" />
+                </label>
+              </div>
+              </div>
+            </details>
             <div class="action-row">
-              <button id="validateAdminApiKey" class="btn btn-outline" type="button">Validasi API Key Admin</button>
               <button id="resetAdminApiKey" class="btn btn-outline" type="button">Reset API Key Admin</button>
               <button id="saveAdminApiKey" class="btn btn-primary" type="button">Simpan API Key Admin</button>
             </div>
@@ -252,23 +277,41 @@
           <span class="label">Objektif</span>
           <textarea id="soObjektif" class="textarea" rows="8" placeholder="Tulis objektif..."></textarea>
         </label>
+        <p class="insert-guide">&darr; Tekan tombol dibawah untuk memasukkan semua data ke dalam resume medis &darr;</p>
         <button id="insertSO" class="btn btn-primary">Masukkan S &amp; O ke Resume</button>
       </section>
 
       <!-- CPPT -->
       <section class="panel" data-panel="cppt" hidden>
-        <p class="note">Pastikan sudah berada di halaman CPPT Ruangan. Jumlah entries akan diatur otomatis ke 100.</p>
-        <button id="aksesCPPT" class="btn btn-primary">Akses CPPT</button>
-        <button id="extractCPPT" class="btn btn-outline" disabled>Proses CPPT dengan AI</button>
-
-        <div id="cpptAccessSummary" class="status cppt-summary" hidden></div>
-        <div id="cpptProgress" class="progress-panel" hidden>
-          <div class="progress-track">
-            <div id="cpptProgressBar" class="progress-fill"></div>
+        <div id="cpptModeStep" class="field">
+          <span class="label">Pasien dirawat pada 1 ruangan / lebih?</span>
+          <div class="action-row">
+            <button id="cpptModeSingle" class="btn btn-primary" type="button">1 ruangan</button>
+            <button id="cpptModeMulti" class="btn btn-outline" type="button">&gt;1 ruangan</button>
           </div>
-          <div id="cpptProgressText" class="progress-text">Menyiapkan CPPT...</div>
         </div>
-        <div id="cpptStatus" class="status" hidden></div>
+        <div id="cpptWorkflow" class="cppt-workflow" hidden>
+          <div class="cppt-workflow-header">
+            <button id="cpptModeBack" class="btn btn-outline btn-small" type="button">&larr; Pilih ulang ruangan</button>
+          </div>
+          <p id="cpptMultiGuide" class="note" hidden><strong>Warning:</strong> Pastikan anda mengakses CPPT di setiap ruangan! Setelah CPPT pertama berhasil diakses, pindah ke halaman CPPT ruangan berikutnya lalu tekan akses berikutnya.</p>
+          <p class="note">Klik Tombol <strong>'Akses CPPT'</strong> jika telah berada di halaman CPPT.</p>
+          <div class="action-row cppt-actions">
+            <button id="aksesCPPT" class="btn btn-primary">Akses CPPT</button>
+            <button id="extractCPPT" class="btn btn-outline" hidden disabled>&#129504; Proses CPPT dengan AI</button>
+          </div>
+
+          <div id="cpptAccessSummary" class="status cppt-summary" hidden></div>
+          <div id="cpptRoomStatus" class="status" hidden></div>
+          <div id="cpptSourceList" class="pulled-list" hidden></div>
+          <div id="cpptProgress" class="progress-panel" hidden>
+            <div class="progress-track">
+              <div id="cpptProgressBar" class="progress-fill"></div>
+            </div>
+            <div id="cpptProgressText" class="progress-text">Menyiapkan CPPT...</div>
+          </div>
+          <div id="cpptStatus" class="status" hidden></div>
+        </div>
 
         <div class="results" id="cpptResults" hidden>
           <div class="result-field">
@@ -299,13 +342,7 @@
             <span class="label">Terapi Saat Pulang</span>
             <textarea class="textarea" rows="3" data-key="terapi_pulang"></textarea>
           </div>
-          <div id="insertCPPTConfirm" class="confirm-box" hidden>
-            <span class="label">Apakah semua data sudah benar?</span>
-            <div class="confirm-actions">
-              <button id="confirmInsertCPPT" class="btn btn-primary" type="button">Ya, masukkan</button>
-              <button id="cancelInsertCPPT" class="btn btn-outline" type="button">Batal</button>
-            </div>
-          </div>
+          <p class="insert-guide">&darr; Tekan tombol dibawah untuk memasukkan semua data ke dalam resume medis &darr;</p>
           <button id="insertCPPT" class="btn btn-primary">Masukkan Semua Data ke Resume</button>
         </div>
       </section>
@@ -333,7 +370,6 @@
         <div class="action-row">
           <button id="pullPenunjang" class="btn btn-primary">Tarik Data</button>
           <button id="summarizePenunjang" class="btn btn-outline" disabled>Rangkum Semua Penunjang</button>
-          <button id="insertPenunjangResume" class="btn btn-primary">Masukkan ke Resume Medis</button>
         </div>
 
         <div id="penunjangStatus" class="status" hidden></div>
@@ -347,6 +383,11 @@
         <div class="pulled-data">
           <span class="label">Data yang ditarik</span>
           <div id="penunjangList" class="pulled-list is-empty">Belum ada data penunjang.</div>
+        </div>
+
+        <div class="action-row insert-bottom">
+          <p class="insert-guide">&darr; Tekan tombol dibawah untuk memasukkan semua data ke dalam resume medis &darr;</p>
+          <button id="insertPenunjangResume" class="btn btn-primary">Masukkan ke Resume Medis</button>
         </div>
       </section>
 
@@ -364,6 +405,19 @@
         <div id="claimAnalysisResult" class="claim-result" hidden></div>
       </section>
     </main>
+
+    <div id="decisionModal" class="full-panel-modal" hidden role="dialog" aria-modal="true" aria-labelledby="decisionModalTitle">
+      <div class="full-panel-dialog">
+        <div>
+          <h2 id="decisionModalTitle" class="section-title">Validasi API key?</h2>
+          <p id="decisionModalMessage" class="modal-message">Apikey akan disimpan. Apakah ingin memvalidasi apikey dahulu?</p>
+        </div>
+        <div class="action-row">
+          <button id="decisionModalPrimary" class="btn btn-primary" type="button">Validasi</button>
+          <button id="decisionModalSecondary" class="btn btn-outline" type="button">Tidak</button>
+        </div>
+      </div>
+    </div>
 
     <div id="toast" class="toast" hidden></div>
 
