@@ -9,6 +9,12 @@ const state = {
   cpptResultReady: false,
   cpptSources: [],
   penunjangFiles: [],
+  claimAnalysisRaw: null,
+  draftKey: "",
+  draftPatientId: "",
+  draftRestoring: false,
+  draftSaveTimer: null,
+  draftLastSavedAt: "",
   adminProviders: [],
   adminUserResetTarget: "",
   adminBackendAuth: null,
@@ -34,6 +40,7 @@ function activatePanel(target) {
     panel.classList.toggle("is-active", active);
     panel.hidden = !active;
   });
+  scheduleDraftSave();
 }
 
 function enterKnowledgeAdminMode() {
@@ -215,6 +222,383 @@ function blobToBase64(blob) {
   });
 }
 
+const DRAFT_DB_NAME = "resume-medis-reviewer-drafts";
+const DRAFT_STORE_NAME = "patientDrafts";
+const DRAFT_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+
+function openDraftDb() {
+  return new Promise((resolve, reject) => {
+    const request = indexedDB.open(DRAFT_DB_NAME, 1);
+    request.onupgradeneeded = () => {
+      const db = request.result;
+      if (!db.objectStoreNames.contains(DRAFT_STORE_NAME)) {
+        db.createObjectStore(DRAFT_STORE_NAME, { keyPath: "key" });
+      }
+    };
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error || new Error("Gagal membuka penyimpanan draft"));
+  });
+}
+
+async function draftDbRequest(mode, callback) {
+  const db = await openDraftDb();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(DRAFT_STORE_NAME, mode);
+    const store = tx.objectStore(DRAFT_STORE_NAME);
+    let request;
+    try {
+      request = callback(store);
+    } catch (error) {
+      reject(error);
+      return;
+    }
+    if (request) {
+      request.onerror = () => reject(request.error || new Error("Operasi draft gagal"));
+    }
+    tx.oncomplete = () => resolve(request?.result);
+    tx.onerror = () => reject(tx.error || new Error("Transaksi draft gagal"));
+  }).finally(() => db.close());
+}
+
+async function getDraft(key) {
+  return draftDbRequest("readonly", (store) => store.get(key));
+}
+
+async function saveDraftRecord(record) {
+  return draftDbRequest("readwrite", (store) => store.put(record));
+}
+
+async function deleteDraftRecord(key) {
+  return draftDbRequest("readwrite", (store) => store.delete(key));
+}
+
+async function cleanupExpiredDrafts() {
+  const db = await openDraftDb();
+  return new Promise((resolve) => {
+    const tx = db.transaction(DRAFT_STORE_NAME, "readwrite");
+    const store = tx.objectStore(DRAFT_STORE_NAME);
+    const threshold = Date.now() - DRAFT_TTL_MS;
+    const request = store.openCursor();
+    request.onsuccess = () => {
+      const cursor = request.result;
+      if (!cursor) return;
+      if (Date.parse(cursor.value?.updatedAt || "") < threshold) cursor.delete();
+      cursor.continue();
+    };
+    tx.oncomplete = () => {
+      db.close();
+      resolve();
+    };
+    tx.onerror = () => {
+      db.close();
+      resolve();
+    };
+  });
+}
+
+async function getActiveTabUrl() {
+  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  return tab?.url || "";
+}
+
+function extractPatientDraftId(url) {
+  const text = String(url || "");
+  const patterns = [
+    /\/pemeriksaanranap\/([^/?#]+)/i,
+    /\/erm\/(?:c_labpk|r_labpk|c_radiologi|r_radiologi)\/([^/?#]+)/i,
+  ];
+  for (const pattern of patterns) {
+    const match = text.match(pattern);
+    if (match?.[1]) return match[1];
+  }
+  return "";
+}
+
+function formatDraftTime(value) {
+  if (!value) return "-";
+  return new Date(value).toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" });
+}
+
+function updateDraftUi(message = "") {
+  const status = $("#draftLocalStatus");
+  if (!status) return;
+  if (!state.draftKey) {
+    status.textContent = "Autosave aktif saat halaman pasien terdeteksi.";
+    return;
+  }
+  status.textContent =
+    message ||
+    `Autosave aktif untuk pasien/episode ${state.draftPatientId}. Draft tersimpan lokal di browser ini dan otomatis dibersihkan setelah 7 hari.`;
+}
+
+function showDraftBanner(updatedAt) {
+  const banner = $("#draftBanner");
+  const text = $("#draftBannerText");
+  if (!banner || !text) return;
+  text.textContent = `Draft pasien ini dipulihkan otomatis • terakhir disimpan ${formatDraftTime(updatedAt)}`;
+  banner.hidden = false;
+}
+
+function hideDraftBanner() {
+  const banner = $("#draftBanner");
+  if (banner) banner.hidden = true;
+}
+
+function collectCpptResultFields() {
+  const values = {};
+  $$("#cpptResults textarea").forEach((ta) => {
+    values[ta.dataset.key] = ta.value || "";
+  });
+  return values;
+}
+
+function fillCpptResultFields(values = {}) {
+  $$("#cpptResults textarea").forEach((ta) => {
+    ta.value = values[ta.dataset.key] || "";
+  });
+}
+
+function collectDraftData() {
+  return {
+    version: 1,
+    patientId: state.draftPatientId,
+    activePanel: document.querySelector(".panel.is-active")?.dataset.panel || "so",
+    so: {
+      subjektif: $("#soSubjektif")?.value || "",
+      objektif: $("#soObjektif")?.value || "",
+    },
+    cppt: {
+      mode: state.cpptMode,
+      text: state.cpptText,
+      summary: state.cpptSummary,
+      penunjang: state.cpptPenunjang,
+      resultReady: state.cpptResultReady,
+      sources: state.cpptSources,
+      results: collectCpptResultFields(),
+    },
+    penunjang: {
+      summary: $("#penunjangSummary")?.value || "",
+      files: state.penunjangFiles,
+    },
+    claim: {
+      raw: state.claimAnalysisRaw,
+    },
+  };
+}
+
+async function saveCurrentDraftNow() {
+  if (!state.draftKey || state.draftRestoring) return;
+  const updatedAt = new Date().toISOString();
+  await saveDraftRecord({
+    key: state.draftKey,
+    patientId: state.draftPatientId,
+    updatedAt,
+    data: collectDraftData(),
+  });
+  state.draftLastSavedAt = updatedAt;
+  updateDraftUi(`Tersimpan otomatis ${formatDraftTime(updatedAt)}. Draft tersimpan lokal di browser ini.`);
+}
+
+function scheduleDraftSave() {
+  if (!state.draftKey || state.draftRestoring) return;
+  clearTimeout(state.draftSaveTimer);
+  state.draftSaveTimer = setTimeout(() => {
+    saveCurrentDraftNow().catch((error) => console.error("Gagal autosave draft", error));
+  }, 500);
+}
+
+function applyDraftData(data = {}) {
+  state.draftRestoring = true;
+  try {
+    if (data.so) {
+      $("#soSubjektif").value = data.so.subjektif || "";
+      $("#soObjektif").value = data.so.objektif || "";
+    }
+    if (data.cppt) {
+      state.cpptMode = data.cppt.mode || "";
+      state.cpptText = data.cppt.text || "";
+      state.cpptSummary = data.cppt.summary || null;
+      state.cpptSources = Array.isArray(data.cppt.sources) ? data.cppt.sources : [];
+      state.cpptResultReady = Boolean(data.cppt.resultReady);
+      updateCpptPenunjangLinked(data.cppt.penunjang || "");
+      fillCpptResultFields(data.cppt.results || {});
+      renderCpptAccessSummary(state.cpptSummary);
+      renderCpptSourceList();
+      updateCarePeriodNote(state.cpptSummary);
+      updateCpptControls();
+    }
+    if (data.penunjang) {
+      $("#penunjangSummary").value = data.penunjang.summary || "";
+      state.penunjangFiles = Array.isArray(data.penunjang.files) ? data.penunjang.files : [];
+      updatePenunjangList();
+    }
+    if (data.claim?.raw) {
+      renderClaimAnalysis(data.claim.raw);
+    }
+    if (data.activePanel) {
+      activatePanel(data.activePanel);
+    }
+  } finally {
+    state.draftRestoring = false;
+  }
+}
+
+async function restoreDraftIfAvailable() {
+  if (!state.draftKey) return;
+  const record = await getDraft(state.draftKey);
+  if (!record?.data) return;
+  const age = Date.now() - Date.parse(record.updatedAt || "");
+  if (!Number.isFinite(age) || age > DRAFT_TTL_MS) {
+    await deleteDraftRecord(state.draftKey);
+    return;
+  }
+  applyDraftData(record.data);
+  showDraftBanner(record.updatedAt);
+  updateDraftUi(`Draft pasien ini dipulihkan otomatis • terakhir disimpan ${formatDraftTime(record.updatedAt)}`);
+}
+
+function resetSidepanelWorkspace() {
+  state.draftRestoring = true;
+  try {
+    hideDraftBanner();
+    $("#soSubjektif").value = "";
+    $("#soObjektif").value = "";
+    state.cpptMode = "";
+    resetCpptAccessState();
+    state.penunjangFiles = [];
+    $("#penunjangSummary").value = "";
+    updatePenunjangList();
+    state.claimAnalysisRaw = null;
+    const claimResult = $("#claimAnalysisResult");
+    if (claimResult) {
+      claimResult.hidden = true;
+      claimResult.textContent = "";
+    }
+    ["penunjangStatus", "claimStatus"].forEach((id) => {
+      const el = $("#" + id);
+      if (!el) return;
+      el.hidden = true;
+      el.textContent = "";
+    });
+    ["penunjangProgress", "claimProgress"].forEach((id) => {
+      const el = $("#" + id);
+      if (el) el.hidden = true;
+    });
+    ["penunjangProgressBar", "claimProgressBar"].forEach((id) => {
+      const el = $("#" + id);
+      if (el) el.style.width = "0%";
+    });
+    const penunjangProgressText = $("#penunjangProgressText");
+    if (penunjangProgressText) penunjangProgressText.textContent = "Menyiapkan penunjang...";
+    const claimProgressText = $("#claimProgressText");
+    if (claimProgressText) claimProgressText.textContent = "Menyiapkan analisa...";
+  } finally {
+    state.draftRestoring = false;
+  }
+}
+
+let draftContextSwitching = false;
+let draftMismatchPrompting = false;
+let draftMismatchAcceptedActiveKey = "";
+
+async function switchDraftContextToActiveTab({ skipSave = false } = {}) {
+  if (draftContextSwitching) return;
+  const url = await getActiveTabUrl();
+  const patientId = extractPatientDraftId(url);
+  const nextKey = patientId ? `patient:${patientId}` : "";
+  if (nextKey === state.draftKey) {
+    state.draftPatientId = patientId;
+    if (!state.draftKey) updateDraftUi();
+    return;
+  }
+
+  draftContextSwitching = true;
+  try {
+    clearTimeout(state.draftSaveTimer);
+    if (!skipSave && state.draftKey && !state.draftRestoring) {
+      await saveCurrentDraftNow();
+    }
+    state.draftPatientId = patientId;
+    state.draftKey = nextKey;
+    state.draftLastSavedAt = "";
+    draftMismatchAcceptedActiveKey = "";
+    resetSidepanelWorkspace();
+    updateDraftUi();
+    if (nextKey) await restoreDraftIfAvailable();
+  } finally {
+    draftContextSwitching = false;
+  }
+}
+
+async function getActivePatientContext() {
+  const url = await getActiveTabUrl();
+  const patientId = extractPatientDraftId(url);
+  return {
+    patientId,
+    key: patientId ? `patient:${patientId}` : "",
+  };
+}
+
+async function handleDraftContextMismatch({ actionMode = false } = {}) {
+  if (!state.draftKey || draftMismatchPrompting) return true;
+  const active = await getActivePatientContext();
+  if (!active.key || active.key === state.draftKey) return true;
+  if (!actionMode && draftMismatchAcceptedActiveKey === active.key) return true;
+
+  draftMismatchPrompting = true;
+  try {
+    const choice = await showDecisionModal({
+      title: "Anda membuat perubahan pada tab yang berbeda.",
+      message: `Draft sidepanel saat ini untuk pasien/episode ${state.draftPatientId}, sedangkan tab aktif terdeteksi pasien/episode ${active.patientId}. Tetap menyimpan perubahan?`,
+      primaryText: "Tetap simpan",
+      secondaryText: "Pakai tab aktif",
+    });
+    if (choice === "secondary") {
+      await switchDraftContextToActiveTab();
+      if (actionMode) {
+        toast("Draft tab aktif dimuat. Silakan ulangi aksi setelah data diperiksa.", "success");
+        return false;
+      }
+      return true;
+    }
+    draftMismatchAcceptedActiveKey = active.key;
+    if (actionMode) {
+      toast("Aksi dibatalkan agar data tidak masuk ke pasien yang berbeda", "error");
+      return false;
+    }
+    return true;
+  } finally {
+    draftMismatchPrompting = false;
+  }
+}
+
+async function ensureDraftContextForPageAction() {
+  return handleDraftContextMismatch({ actionMode: true });
+}
+
+async function clearCurrentPatientDraft() {
+  if (!state.draftKey) {
+    toast("Halaman pasien belum terdeteksi", "error");
+    return;
+  }
+  if (!window.confirm("Hapus draft pasien ini? Data di sidepanel akan dikosongkan.")) return;
+  clearTimeout(state.draftSaveTimer);
+  state.draftRestoring = true;
+  await deleteDraftRecord(state.draftKey);
+  try {
+    resetSidepanelWorkspace();
+  } finally {
+    state.draftRestoring = false;
+  }
+  updateDraftUi("Draft pasien ini dihapus. Autosave akan membuat draft baru saat ada perubahan.");
+  toast("Draft pasien dihapus", "success");
+}
+
+async function initDraftSystem() {
+  await cleanupExpiredDrafts();
+  await switchDraftContextToActiveTab({ skipSave: true });
+}
+
 function updatePenunjangList() {
   const list = $("#penunjangList");
   if (!list) return;
@@ -253,6 +637,7 @@ function updatePenunjangList() {
     remove.addEventListener("click", () => {
       state.penunjangFiles.splice(idx, 1);
       updatePenunjangList();
+      scheduleDraftSave();
       toast("Data tarikan dihapus", "success");
     });
 
@@ -272,10 +657,12 @@ function updateCpptPenunjangLinked(value) {
   if (!state.cpptPenunjang) {
     field.hidden = true;
     textarea.value = "";
+    scheduleDraftSave();
     return;
   }
   textarea.value = state.cpptPenunjang;
   field.hidden = false;
+  scheduleDraftSave();
 }
 
 function getPenunjangIdentity(item) {
@@ -292,6 +679,7 @@ function mergePenunjangFiles(newFiles) {
     state.penunjangFiles.push(file);
     added.push(file);
   });
+  if (added.length) scheduleDraftSave();
   return added;
 }
 
@@ -593,14 +981,41 @@ function parsePenunjangDocument(text, file) {
   };
 }
 
+function sanitizePenunjangText(value) {
+  return String(value || "")
+    .split(/\r?\n/)
+    .filter((line) => {
+      const text = line.trim();
+      if (!text) return false;
+      return !/(?:\bnama\b|\bnama pasien\b|\bnik\b|\bno\.?\s*rm\b|\bno\.?\s*rekam\b|\bno\.?\s*sep\b|\bsep\b|\balamat\b|\btgl\.?\s*lahir\b|\btanggal\s*lahir\b|\btempat\s*lahir\b|\btelepon\b|\bno\.?\s*hp\b|\bpenjamin\b|\bpeserta\b)\s*[:=]/i.test(text);
+    })
+    .join("\n")
+    .replace(/\b\d{16}\b/g, "[NIK]")
+    .replace(/\b\d{13,18}\b/g, "[ID]")
+    .replace(/[A-Z0-9]{8}-[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{12}/gi, "[ID]")
+    .replace(/https?:\/\/\S+/gi, "[URL]")
+    .trim();
+}
+
+function sanitizePenunjangValue(value) {
+  if (typeof value === "string") return sanitizePenunjangText(value);
+  if (Array.isArray(value)) return value.map(sanitizePenunjangValue);
+  if (value && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value)
+        .filter(([key]) => !/url|href|link|nama|nik|sep|alamat|telepon|phone|rm|rekam|patient|pasien/i.test(key))
+        .map(([key, nextValue]) => [key, sanitizePenunjangValue(nextValue)])
+    );
+  }
+  return value;
+}
+
 function compactParsedDocs(files) {
   return files.map((file, index) => ({
     index: index + 1,
-    code: file.code,
     date: file.resultDate,
     kind: file.kind,
-    url: file.url,
-    parser: file.parsed?.structured || null,
+    parser: sanitizePenunjangValue(file.parsed?.structured || null),
   }));
 }
 
@@ -1393,6 +1808,7 @@ function appendList(parent, title, items, extraClass = "") {
 function renderClaimAnalysis(rawAnalysis) {
   const result = $("#claimAnalysisResult");
   const analysis = normalizeClaimAnalysis(rawAnalysis);
+  state.claimAnalysisRaw = rawAnalysis;
   result.hidden = false;
   result.className = "claim-result";
   result.textContent = "";
@@ -1437,6 +1853,7 @@ function renderClaimAnalysis(rawAnalysis) {
   appendList(result, "Bukti Ditemukan", analysis.found_evidence);
   appendList(result, "Bukti Belum Ditemukan", analysis.missing_evidence);
   appendList(result, "Saran Kelengkapan Resume", analysis.recommendations, "claim-card claim-recommendations");
+  scheduleDraftSave();
 }
 
 function parseFlexibleDate(value) {
@@ -1856,16 +2273,29 @@ const SUPABASE_ANON_KEY =
 const penunjangSystemPrompt =
   `Kamu adalah dokter DPJP yang merangkum pemeriksaan penunjang bermakna dari data rekam medis.
 
-ATURAN PENULISAN:
+OUTPUT FORMAT:
+- Tulis output dalam Bahasa Indonesia.
 - Output satu field saja: pemeriksaan penunjang bermakna.
-- Sangat singkat, padat, jelas, gaya catatan medis dokter.
-- Gabungkan semua data; jangan hilangkan hasil penting dari dokumen berbeda.
-- Kelompokkan per modalitas bila jelas: Lab, USG, CT, MRI, Echo, EKG, Rontgen, PA, Kultur, dll.
-- Untuk nilai lab serial gunakan format nilai_awal->nilai_akhir satuan.
-- Gunakan koma desimal Indonesia dan titik ribuan.
-- Sertakan tanggal bila tampak bermakna.
-- Abaikan hasil normal yang tidak bermakna, kecuali diperlukan untuk konteks.
-- Jangan menulis penjelasan proses, disclaimer, atau narasi panjang.`;
+- Kelompokkan temuan bermakna berdasarkan modalitas bila tersedia: Rontgen/X-Ray, CT Scan, MRI, USG/Ultrasound, Echocardiography, ECG/EKG, Laboratorium, Mikrobiologi, Kultur, Patologi Anatomi, Endoskopi, Lainnya.
+- Untuk pemeriksaan serial gunakan format: (tanggal) temuan. (tanggal) temuan.
+- Untuk nilai laboratorium serial gunakan format: nilai_awal->nilai_akhir satuan.
+- Kelompokkan laboratorium bila memungkinkan menjadi: Hematologi, Kimia Klinik, Elektrolit, Koagulasi, AGD, Urinalisis, Mikrobiologi, Serologi, Imunologi.
+- Interpretasi singkat dalam tanda kurung boleh hanya jika langsung didukung data.
+- Jangan gunakan tabel.
+- Jangan gunakan bullet point.
+- Abaikan hasil normal yang tidak relevan.
+- Jaga tetap ringkas dan bergaya resume medis dokter saat pasien pulang.
+
+CONTOH:
+Rontgen:
+Thorax AP: (10/05) Kardiomegali, edema paru bilateral. (12/05) Edema paru membaik.
+
+Laboratorium:
+Kimia Klinik: GDS 212->132 mg/dl, Albumin 3,14 g/dl.
+Hematologi: Hb 10,9 g/dl, MCV 72,3 fL (anemia mikrositik hipokromik).
+
+Mikrobiologi:
+Sputum Gram: Kokus gram positif (+).`;
 
 const penunjangSchema = {
   type: "object",
@@ -1875,31 +2305,24 @@ const penunjangSchema = {
   required: ["penunjang"],
 };
 
-async function callGeminiForPenunjangPdf({ apiKey, model, files }) {
-  const parts = [
-    {
-      text:
-        "Rangkum seluruh PDF penunjang berikut menjadi output singkat, padat, jelas. Jika ada lab serial, tulis perubahan awal->akhir. Kembalikan JSON sesuai skema.",
-    },
-  ];
-  files.forEach((file, idx) => {
-    parts.push({
-      text: `\n\nDokumen ${idx + 1}: ${file.kind || "Penunjang"} ${file.resultDate || ""} ${file.code || ""}`,
-    });
-    parts.push({
-      inlineData: {
-        mimeType: file.mimeType || "application/pdf",
-        data: file.base64,
-      },
-    });
-  });
-
+async function callGeminiForPenunjangParsedDocs({ apiKey, model, parsedDocs }) {
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(
     model
   )}:generateContent?key=${encodeURIComponent(apiKey)}`;
   const body = {
     systemInstruction: { parts: [{ text: penunjangSystemPrompt }] },
-    contents: [{ role: "user", parts }],
+    contents: [
+      {
+        role: "user",
+        parts: [
+          {
+            text:
+              "Berikut JSON hasil parser lokal dari PDF penunjang yang sudah dihilangkan data identitas pasien. Ambil hanya data klinis bermakna dan kembalikan JSON sesuai skema.\n\n" +
+              JSON.stringify(parsedDocs),
+          },
+        ],
+      },
+    ],
     generationConfig: {
       responseMimeType: "application/json",
       responseSchema: penunjangSchema,
@@ -1929,7 +2352,7 @@ async function callOpenAiCompatibleForPenunjang({ provider, apiKey, model, parse
       {
         role: "user",
         content:
-          "Berikut JSON hasil parser lokal dari PDF penunjang. Ambil hanya data bermakna, gabungkan lab serial bila ada, dan kembalikan JSON {\"penunjang\":\"...\"}.\n\n" +
+          "Berikut JSON hasil parser lokal dari PDF penunjang yang sudah dihilangkan data identitas pasien. Ambil hanya data bermakna, gabungkan lab serial bila ada, dan kembalikan JSON {\"penunjang\":\"...\"}.\n\n" +
           JSON.stringify(parsedDocs),
       },
     ],
@@ -2670,6 +3093,7 @@ function setButtonState(button, stateName, text, options = {}) {
 
 pullSOButton.addEventListener("click", async () => {
   try {
+    if (!(await ensureDraftContextForPageAction())) return;
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
     if (!tab?.id) throw new Error("Tab aktif tidak ditemukan");
     const [{ result }] = await chrome.scripting.executeScript({
@@ -2694,6 +3118,7 @@ pullSOButton.addEventListener("click", async () => {
 
     $("#soSubjektif").value = result.subjektif || "";
     $("#soObjektif").value = result.objektif || "";
+    scheduleDraftSave();
     setButtonState(pullSOButton, "success", "✓ Data S & O Ditarik");
     toast("Data S & O berhasil ditarik", "success");
   } catch (e) {
@@ -2706,9 +3131,10 @@ pullSOButton.addEventListener("click", async () => {
 const insertSOButton = $("#insertSO");
 
 insertSOButton.addEventListener("click", async () => {
-  const subjektif = $("#soSubjektif").value;
-  const objektif = $("#soObjektif").value;
   try {
+    if (!(await ensureDraftContextForPageAction())) return;
+    const subjektif = $("#soSubjektif").value;
+    const objektif = $("#soObjektif").value;
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
     if (!tab?.id) throw new Error("Tab aktif tidak ditemukan");
     const [{ result }] = await chrome.scripting.executeScript({
@@ -2753,11 +3179,13 @@ const cpptModeBackBtn = $("#cpptModeBack");
 cpptModeSingleBtn?.addEventListener("click", () => {
   state.cpptMode = "single";
   resetCpptAccessState();
+  scheduleDraftSave();
 });
 
 cpptModeMultiBtn?.addEventListener("click", () => {
   state.cpptMode = "multi";
   resetCpptAccessState();
+  scheduleDraftSave();
 });
 
 cpptModeBackBtn?.addEventListener("click", () => {
@@ -2768,6 +3196,7 @@ updateCpptControls();
 
 aksesBtn.addEventListener("click", async () => {
   try {
+    if (!(await ensureDraftContextForPageAction())) return;
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
     if (!tab?.id) throw new Error("Tab aktif tidak ditemukan");
     const [{ result }] = await chrome.scripting.executeScript({
@@ -2858,6 +3287,7 @@ aksesBtn.addEventListener("click", async () => {
     } else if (state.cpptMode === "multi" && state.cpptSources.length > 1) {
       updateCpptRoomStatus("CPPT beberapa ruangan sudah digabung. Anda masih dapat akses ruangan berikutnya bila ada.");
     }
+    scheduleDraftSave();
     toast("CPPT berhasil di akses", "success");
   } catch (e) {
     console.error(e);
@@ -3030,6 +3460,7 @@ Berikan output untuk: Pemeriksaan Penunjang Bermakna, Terapi Selama Dirawat, Ope
       toast("Hasil extract kosong", "error");
     } else {
       const filled = Object.values(normalized).filter((value) => String(value || "").trim()).length;
+      scheduleDraftSave();
       progress.complete(`Selesai. ${filled}/7 field terisi dan dapat diedit di bawah.`);
       toast("Ekstraksi selesai", "success");
     }
@@ -3048,6 +3479,7 @@ const summarizePenunjangBtn = $("#summarizePenunjang");
 const pullPeriodConfirm = $("#pullPeriodConfirm");
 const pullPeriodYes = $("#pullPeriodYes");
 const pullPeriodNo = $("#pullPeriodNo");
+const MIN_PENUNJANG_FILE_SIZE = 10 * 1024;
 
 function setPullConfirmVisible(visible) {
   if (pullPeriodConfirm) pullPeriodConfirm.hidden = !visible;
@@ -3071,13 +3503,35 @@ async function pullPenunjangData({ filterByPeriod }) {
   pullPenunjangBtn.disabled = true;
 
   try {
+    if (!(await ensureDraftContextForPageAction())) {
+      status.hidden = true;
+      return;
+    }
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
     if (!tab?.id) throw new Error("Tab aktif tidak ditemukan");
 
     const [{ result }] = await chrome.scripting.executeScript({
       target: { tabId: tab.id },
       func: async () => {
-        const wrapper = document.querySelector("#DataTables_Table_1_wrapper");
+        let wrapper = document.querySelector("#DataTables_Table_1_wrapper");
+        const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+        const setSelectValue = (select, value) => {
+          if (!select) return false;
+          const option = Array.from(select.options || []).find((item) => item.value === value);
+          if (!option) return false;
+          select.value = value;
+          select.dispatchEvent(new Event("input", { bubbles: true }));
+          select.dispatchEvent(new Event("change", { bubbles: true }));
+          return true;
+        };
+        const lengthSelect =
+          document.querySelector('select[name="DataTables_Table_1_length"]') ||
+          wrapper?.querySelector?.('select[name$="_length"]') ||
+          document.querySelector("#DataTables_Table_1_length select");
+        if (setSelectValue(lengthSelect, "50")) {
+          await wait(650);
+          wrapper = document.querySelector("#DataTables_Table_1_wrapper");
+        }
         const table = wrapper?.querySelector?.("table");
         const bodyRows = Array.from(table?.querySelectorAll?.("tbody tr") || []).filter((row) => {
           const style = window.getComputedStyle(row);
@@ -3165,12 +3619,17 @@ async function pullPenunjangData({ filterByPeriod }) {
       candidateRows = candidateRows.filter((row) => isWithinCarePeriod(row.resultDate));
     }
     const okRows = [];
+    const smallRows = [];
     const failedRows = (result?.rows || []).filter((row) => !row.ok);
     for (const row of candidateRows) {
       try {
         const response = await fetch(row.url, { credentials: "include" });
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
         const blob = await response.blob();
+        if (blob.size <= MIN_PENUNJANG_FILE_SIZE) {
+          smallRows.push({ ...row, ok: false, size: blob.size, error: "Ukuran file kurang dari 10 KB" });
+          continue;
+        }
         const arrayBuffer = await blob.arrayBuffer();
         const base64 = arrayBufferToBase64(arrayBuffer);
         okRows.push({
@@ -3193,12 +3652,28 @@ async function pullPenunjangData({ filterByPeriod }) {
       status.className = "status";
       status.textContent =
         summarizePulledKinds(addedRows) +
+        `${smallRows.length ? `, ${smallRows.length} diabaikan karena kurang dari 10 KB` : ""}` +
         `${failedRows.length ? `, ${failedRows.length} gagal` : ""}.`;
-      toast("Data penunjang berhasil ditarik", "success");
+      if (smallRows.length) {
+        toast(`${smallRows.length} data penunjang diabaikan karena ukuran file kurang dari 10 KB`, "error");
+      } else {
+        toast("Data penunjang berhasil ditarik", "success");
+      }
     } else if (okRows.length > 0) {
       status.className = "status";
-      status.textContent = "Data sudah pernah ditarik, tidak ada data baru.";
-      toast("Tidak ada data baru", "success");
+      status.textContent =
+        "Data sudah pernah ditarik, tidak ada data baru." +
+        `${smallRows.length ? ` ${smallRows.length} data diabaikan karena kurang dari 10 KB.` : ""}`;
+      toast(
+        smallRows.length
+          ? `${smallRows.length} data penunjang diabaikan karena ukuran file kurang dari 10 KB`
+          : "Tidak ada data baru",
+        smallRows.length ? "error" : "success"
+      );
+    } else if (smallRows.length > 0) {
+      status.className = "status is-error";
+      status.textContent = "Data penunjang ditemukan, tetapi semuanya kurang dari 10 KB. Tidak dimasukkan.";
+      toast(`${smallRows.length} data penunjang diabaikan karena ukuran file kurang dari 10 KB`, "error");
     } else if (result?.total) {
       status.className = "status is-error";
       status.textContent = filterByPeriod
@@ -3207,7 +3682,7 @@ async function pullPenunjangData({ filterByPeriod }) {
       toast("PDF tidak berhasil ditarik", "error");
     } else {
       status.className = "status is-error";
-      status.textContent = "Pastikan sudah di halaman Tindak Lanjut > Radiologi, Lab PK, dll";
+      status.textContent = "Pastikan sudah di halaman Riwayat pada halaman awal RM Pasien";
       toast("Data HASIL tidak ditemukan", "error");
     }
   } catch (e) {
@@ -3253,26 +3728,28 @@ summarizePenunjangBtn.addEventListener("click", async () => {
       summary = await callAdminAiText({
         systemPrompt: penunjangSystemPrompt,
         userPrompt:
-          "Rangkum pemeriksaan penunjang bermakna dari hasil ekstraksi PDF berikut:\n\n" +
+          "Rangkum pemeriksaan penunjang bermakna dari hasil ekstraksi PDF berikut. Data identitas pasien sudah dihilangkan; gunakan hanya data klinis bermakna:\n\n" +
           JSON.stringify(parsedDocs),
         userSession: ai.adminUserSession,
       });
       progress.stop();
     } else if (ai.provider === "gemini") {
-      await progress.setProgress("Merangkum PDF langsung dengan Gemini...", 50);
+      await progress.setProgress("Mengekstrak PDF lokal sebelum dikirim ke Gemini...", 35);
+      const parsedDocs = await parsePenunjangFilesWithPdfJs(state.penunjangFiles);
+      await progress.setProgress("Merangkum data penunjang tersanitasi dengan Gemini...", 60);
       progress.startWaiting("Menunggu respons AI penunjang");
-      summary = await callGeminiForPenunjangPdf({
+      summary = await callGeminiForPenunjangParsedDocs({
         apiKey: ai.apiKey,
         model: ai.model,
-        files: state.penunjangFiles,
+        parsedDocs,
       });
       progress.stop();
     } else {
+      await progress.setProgress("Mencoba parser lokal PDF.js...", 35);
+      const parsedDocs = await parsePenunjangFilesWithPdfJs(state.penunjangFiles);
       try {
-        await progress.setProgress("Mencoba parser lokal PDF.js...", 35);
-        const parsedDocs = await parsePenunjangFilesWithPdfJs(state.penunjangFiles);
         const providerLabel = getProviderDisplay(ai.provider, ai.providerLabel);
-        await progress.setProgress(`PDF berhasil diekstrak. Merangkum dengan ${providerLabel}...`, 60);
+        await progress.setProgress(`PDF berhasil diekstrak dan disanitasi. Merangkum dengan ${providerLabel}...`, 60);
         progress.startWaiting("Menunggu respons AI penunjang");
         summary = await callOpenAiCompatibleForPenunjang({
           provider: ai.provider,
@@ -3287,15 +3764,15 @@ summarizePenunjangBtn.addEventListener("click", async () => {
         progress.stop();
         if (!ai.geminiFallbackApiKey) {
           throw new Error(
-            `${getProviderDisplay(ai.provider, ai.providerLabel)}/parser gagal: ${primaryError.message}. Gemini API fallback belum diisi.`
+            `${getProviderDisplay(ai.provider, ai.providerLabel)} gagal: ${primaryError.message}. Gemini API fallback belum diisi.`
           );
         }
-        await progress.setProgress(`Gagal menggunakan ${getProviderDisplay(ai.provider, ai.providerLabel)}/parser. Melanjutkan dengan Gemini API fallback...`, 68);
+        await progress.setProgress(`Gagal menggunakan ${getProviderDisplay(ai.provider, ai.providerLabel)}. Melanjutkan dengan Gemini API fallback memakai data tersanitasi...`, 68);
         progress.startWaiting("Menunggu respons Gemini fallback");
-        summary = await callGeminiForPenunjangPdf({
+        summary = await callGeminiForPenunjangParsedDocs({
           apiKey: ai.geminiFallbackApiKey,
           model: ai.geminiFallbackModel,
-          files: state.penunjangFiles,
+          parsedDocs,
         });
         progress.stop();
       }
@@ -3303,6 +3780,7 @@ summarizePenunjangBtn.addEventListener("click", async () => {
 
     await progress.setProgress("Menyusun rangkuman penunjang...", 94);
     $("#penunjangSummary").value = summary || "";
+    scheduleDraftSave();
     progress.complete("Selesai. Rangkuman dapat diedit di field Pemeriksaan Penunjang Bermakna.");
     toast("Rangkuman penunjang selesai", "success");
   } catch (e) {
@@ -3317,18 +3795,19 @@ summarizePenunjangBtn.addEventListener("click", async () => {
 // ---------------- CPPT: Masukkan Detail ke halaman ----------------
 $("#insertCPPT").addEventListener("click", async () => {
   if (!window.confirm("Apakah semua data sudah benar?")) return;
-  const getVal = (key) =>
-    document.querySelector(`#cpptResults textarea[data-key="${key}"]`)?.value ?? "";
-  const payload = {
-    an: getVal("penunjang"),
-    af: getVal("terapi_dirawat"),
-    a: getVal("operasi"),
-    b: getVal("dx_utama"),
-    c: getVal("dx_sekunder"),
-    d: getVal("konsul"),
-    e: getVal("terapi_pulang"),
-  };
   try {
+    if (!(await ensureDraftContextForPageAction())) return;
+    const getVal = (key) =>
+      document.querySelector(`#cpptResults textarea[data-key="${key}"]`)?.value ?? "";
+    const payload = {
+      an: getVal("penunjang"),
+      af: getVal("terapi_dirawat"),
+      a: getVal("operasi"),
+      b: getVal("dx_utama"),
+      c: getVal("dx_sekunder"),
+      d: getVal("konsul"),
+      e: getVal("terapi_pulang"),
+    };
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
     if (!tab?.id) throw new Error("Tab aktif tidak ditemukan");
     const [{ result }] = await chrome.scripting.executeScript({
@@ -3343,11 +3822,25 @@ $("#insertCPPT").addEventListener("click", async () => {
           el.dispatchEvent(new Event("change", { bubbles: true }));
           return true;
         };
+        const findResumeField = (name) => {
+          const fields = [
+            ...document.querySelectorAll(`input[name="${name}"], textarea[name="${name}"]`),
+          ];
+          return (
+            fields.find(
+              (el) =>
+                el.type !== "hidden" &&
+                !el.disabled &&
+                !el.readOnly &&
+                Boolean(el.offsetWidth || el.offsetHeight || el.getClientRects().length)
+            ) ||
+            fields.find((el) => el.type !== "hidden" && !el.disabled && !el.readOnly) ||
+            fields[0]
+          );
+        };
         const found = {};
         for (const [name, val] of Object.entries(data)) {
-          const el = document.querySelector(
-            `input[name="${name}"], textarea[name="${name}"]`
-          );
+          const el = findResumeField(name);
           found[name] = setVal(el, val);
         }
         return found;
@@ -3365,8 +3858,9 @@ $("#insertCPPT").addEventListener("click", async () => {
 
 // ---------------- Tindak Lanjut: Masukkan penunjang ke resume ----------------
 $("#insertPenunjangResume").addEventListener("click", async () => {
-  const value = $("#penunjangSummary").value;
   try {
+    if (!(await ensureDraftContextForPageAction())) return;
+    const value = $("#penunjangSummary").value;
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
     if (!tab?.id) throw new Error("Tab aktif tidak ditemukan");
     const [{ result }] = await chrome.scripting.executeScript({
@@ -3381,7 +3875,17 @@ $("#insertPenunjangResume").addEventListener("click", async () => {
           el.dispatchEvent(new Event("change", { bubbles: true }));
           return true;
         };
-        const el = document.querySelector('input[name="an"], textarea[name="an"]');
+        const fields = [...document.querySelectorAll('input[name="an"], textarea[name="an"]')];
+        const el =
+          fields.find(
+            (field) =>
+              field.type !== "hidden" &&
+              !field.disabled &&
+              !field.readOnly &&
+              Boolean(field.offsetWidth || field.offsetHeight || field.getClientRects().length)
+          ) ||
+          fields.find((field) => field.type !== "hidden" && !field.disabled && !field.readOnly) ||
+          fields[0];
         return setVal(el, val);
       },
       args: [value],
@@ -3411,6 +3915,8 @@ $("#analyzeClaimBpjs").addEventListener("click", async () => {
   button.disabled = true;
   result.hidden = true;
   result.textContent = "";
+  state.claimAnalysisRaw = null;
+  scheduleDraftSave();
 
   try {
     await progressCtl.setProgress("Membaca form extension...", 8);
@@ -3462,4 +3968,42 @@ $("#analyzeClaimBpjs").addEventListener("click", async () => {
   } finally {
     button.disabled = false;
   }
+});
+
+document.addEventListener("input", (event) => {
+  const target = event.target;
+  if (!(target instanceof HTMLElement)) return;
+  if (
+    target.matches(
+      "#soSubjektif, #soObjektif, #penunjangSummary, #cpptResults textarea"
+    )
+  ) {
+    handleDraftContextMismatch({ actionMode: false })
+      .then((ok) => {
+        if (ok) scheduleDraftSave();
+      })
+      .catch((error) => {
+        console.error("Gagal memeriksa konteks draft pasien", error);
+        scheduleDraftSave();
+      });
+  }
+});
+
+$("#clearDraftBanner")?.addEventListener("click", () => {
+  clearCurrentPatientDraft().catch((error) => {
+    console.error(error);
+    toast("Gagal menghapus draft", "error");
+  });
+});
+
+$("#clearPatientDraft")?.addEventListener("click", () => {
+  clearCurrentPatientDraft().catch((error) => {
+    console.error(error);
+    toast("Gagal menghapus draft", "error");
+  });
+});
+
+initDraftSystem().catch((error) => {
+  console.error("Gagal memulai autosave draft", error);
+  updateDraftUi("Autosave draft belum aktif. Muat ulang extension bila perlu.");
 });

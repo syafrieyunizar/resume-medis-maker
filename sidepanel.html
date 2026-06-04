@@ -21,12 +21,21 @@
     </header>
 
     <main class="content">
+      <div id="draftBanner" class="draft-banner" hidden>
+        <span id="draftBannerText">Draft pasien ini dipulihkan otomatis.</span>
+        <button id="clearDraftBanner" class="btn btn-outline btn-small" type="button">Hapus Draft</button>
+      </div>
       <!-- SETTING -->
       <section class="panel" data-panel="setting" hidden>
         <div id="settingsMain" class="settings-main">
         <div class="active-apikey-box">
           <span class="label">Apikey Aktif</span>
           <div id="activeApiKeyStatus" class="active-apikey-status is-error">Tidak ada apikey aktif</div>
+        </div>
+        <div class="draft-local-box">
+          <span class="label">Draft Lokal</span>
+          <div id="draftLocalStatus" class="draft-local-status">Autosave aktif saat halaman pasien terdeteksi.</div>
+          <button id="clearPatientDraft" class="btn btn-outline" type="button">Hapus Draft Pasien Ini</button>
         </div>
         <label class="field">
           <span class="label">Sumber API Key</span>
@@ -359,17 +368,18 @@
           <textarea id="penunjangSummary" class="textarea textarea-long" rows="10" placeholder="Hasil rangkuman penunjang bermakna akan muncul di sini..."></textarea>
         </label>
 
-        <div id="pullPeriodConfirm" class="confirm-box" hidden>
-          <span class="label">Tarik data sesuai periode rawat inap?</span>
-          <div class="confirm-actions">
-            <button id="pullPeriodYes" class="btn btn-primary" type="button">Ya, sesuai periode</button>
-            <button id="pullPeriodNo" class="btn btn-outline" type="button">Tidak, tarik semua</button>
+        <div id="pullPeriodConfirm" class="full-panel-modal" hidden role="dialog" aria-modal="true" aria-labelledby="pullPeriodConfirmTitle">
+          <div class="full-panel-dialog">
+            <h2 id="pullPeriodConfirmTitle" class="section-title">Tarik data sesuai periode rawat inap?</h2>
+            <div class="action-row">
+              <button id="pullPeriodYes" class="btn btn-primary" type="button">Ya, sesuai periode</button>
+              <button id="pullPeriodNo" class="btn btn-outline" type="button">Tidak, tarik semua</button>
+            </div>
           </div>
         </div>
 
         <div class="action-row">
           <button id="pullPenunjang" class="btn btn-primary">Tarik Data</button>
-          <button id="summarizePenunjang" class="btn btn-outline" disabled>Rangkum Semua Penunjang</button>
         </div>
 
         <div id="penunjangStatus" class="status" hidden></div>
@@ -383,6 +393,7 @@
         <div class="pulled-data">
           <span class="label">Data yang ditarik</span>
           <div id="penunjangList" class="pulled-list is-empty">Belum ada data penunjang.</div>
+          <button id="summarizePenunjang" class="btn btn-outline" disabled>🧠 Rangkum Penunjang</button>
         </div>
 
         <div class="action-row insert-bottom">
