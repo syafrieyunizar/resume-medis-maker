@@ -21,19 +21,19 @@ function buildImprovePrompt(kind, existingText, instruction) {
   const guidance = isAnamnesis
     ? [
         "- Pertahankan isi asli yang sudah ada.",
-        "- Tambahkan detail klinis yang relevan dengan arahan user, meski belum tertulis, sebagai draft dokter.",
-        "- Fokus pada keluhan, perjalanan penyakit, gejala penyerta, faktor risiko, atau tanda yang mendukung arah diagnosis.",
+        "- Hanya buat draft penyesuaian pada keluhan, perjalanan penyakit, dan gejala penyerta yang relevan dengan arahan user.",
+        "- Jangan menambahkan faktor risiko, RPD, RPO, riwayat alergi, atau riwayat lain bila tidak ada pada teks awal atau tidak disebut eksplisit oleh user.",
+        "- Fokus pada keluhan, perjalanan penyakit, gejala penyerta, atau tanda yang mendukung arah diagnosis.",
         "- Gunakan bahasa singkat, padat, gaya catatan medis dokter.",
         "- Output hanya teks anamnesis akhir.",
         "- Tulis hasil rapi dengan pemisahan baris.",
         "- Paragraf utama berisi keluhan dan perjalanan penyakit.",
-        "- Jika ada, tulis 'Faktor risiko:' pada baris baru.",
-        "- Jika ada, tulis 'RPD:' pada baris baru.",
-        "- Jika ada, tulis 'RPO:' pada baris baru.",
+        "- Jika Faktor risiko/RPD/RPO sudah ada pada teks awal atau disebut eksplisit oleh user, pertahankan dan rapikan pada baris sendiri.",
+        "- Jika Faktor risiko/RPD/RPO tidak ada, jangan tuliskan section tersebut.",
       ].join("\n")
     : [
         "- Pertahankan isi asli yang sudah ada.",
-        "- Tambahkan detail pemeriksaan fisik yang relevan dengan arahan user, meski belum tertulis, sebagai draft dokter.",
+        "- Hanya buat draft penyesuaian pada pemeriksaan fisik yang relevan dengan arahan user.",
         "- Fokus pada temuan objektif singkat yang mendukung arah diagnosis, misalnya konjungtiva pucat (+), akral dingin, CRT, ronki, wheezing, edema, dll bila relevan.",
         "- Gunakan bahasa singkat, padat, gaya catatan medis dokter.",
         "- Output hanya teks pemeriksaan fisik akhir.",
@@ -80,9 +80,98 @@ ARAHAN USER:
 ${instruction}`;
 }
 
+function findFirstJsonObject(text) {
+  const source = String(text || "");
+  const start = source.indexOf("{");
+  if (start < 0) return "";
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+  for (let i = start; i < source.length; i += 1) {
+    const char = source[i];
+    if (inString) {
+      if (escaped) escaped = false;
+      else if (char === "\\") escaped = true;
+      else if (char === "\"") inString = false;
+      continue;
+    }
+    if (char === "\"") inString = true;
+    else if (char === "{") depth += 1;
+    else if (char === "}") {
+      depth -= 1;
+      if (depth === 0) return source.slice(start, i + 1);
+    }
+  }
+  return "";
+}
+
+function parseJsonResponse(text) {
+  if (!text) throw new Error("Respons kosong dari provider");
+  const cleaned = String(text).trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "");
+  try {
+    return JSON.parse(cleaned);
+  } catch (error) {
+    const firstObject = findFirstJsonObject(cleaned);
+    if (firstObject) return JSON.parse(firstObject);
+    throw error;
+  }
+}
+
+function normalizeArray(value) {
+  return Array.isArray(value) ? value : [];
+}
+
+function normalizeAiPoweredSoapResult(value) {
+  const data = value && typeof value === "object" ? value : {};
+  const draft = data.draft && typeof data.draft === "object" ? data.draft : {};
+  return {
+    draft: {
+      subjektif: String(draft.subjektif || ""),
+      objektif: String(draft.objektif || ""),
+      assessment: String(draft.assessment || draft.assesment || ""),
+      planning: String(draft.planning || ""),
+      vitals: draft.vitals && typeof draft.vitals === "object" ? draft.vitals : {},
+    },
+    confirmations: normalizeArray(data.confirmations)
+      .map((item) => ({
+        label: String(item?.label || "").trim(),
+        target_field: String(item?.target_field || "").trim().toLowerCase(),
+        insert_text: String(item?.insert_text || "").trim(),
+      }))
+      .filter((item) => item.label && item.target_field && item.insert_text),
+    reason: String(data.reason || "").trim(),
+  };
+}
+
+function buildAiPoweredSoapPrompt({ targetDiagnosis, pageData, context }) {
+  return [
+    "Kamu membantu dokter membuat draft SOAP dari data rekam medis yang tersedia.",
+    "",
+    "ATURAN WAJIB:",
+    "- Output hanya JSON valid, tanpa markdown.",
+    "- Draft SOAP hanya boleh memakai data yang sudah tersedia pada PAGE_DATA atau CONTEXT.",
+    "- Data yang belum terdokumentasi harus masuk ke confirmations sebagai pertanyaan konfirmasi dokter, bukan langsung sebagai fakta di draft.",
+    "- confirmations harus relevan dengan DIAGNOSIS_TARGET dan berisi teks yang akan ditambahkan bila dokter mencentang.",
+    "- Gunakan bahasa Indonesia, singkat, padat, gaya catatan dokter.",
+    "",
+    "FORMAT JSON:",
+    "{\"draft\":{\"subjektif\":\"\",\"objektif\":\"\",\"assessment\":\"\",\"planning\":\"\",\"vitals\":{}},\"confirmations\":[{\"label\":\"\",\"target_field\":\"subjektif|objektif|assessment|planning\",\"insert_text\":\"\"}],\"reason\":\"\"}",
+    "",
+    "DIAGNOSIS_TARGET:",
+    targetDiagnosis,
+    "",
+    "PAGE_DATA:",
+    JSON.stringify(pageData || {}),
+    "",
+    "CONTEXT:",
+    JSON.stringify(context || {}),
+  ].join("\n");
+}
+
 function normalizeSpacing(text) {
   return String(text || "")
     .replace(/\r/g, "")
+    .replace(/[→⇒➔➜➝➞]/g, "->")
     .replace(/[ \t]+\n/g, "\n")
     .replace(/\n{3,}/g, "\n\n")
     .trim();
@@ -96,6 +185,7 @@ function formatImproveAnamnesis(text) {
       .replace(/\s+(RPO:)/gi, "\n$1")
       .replace(/\s+(Riwayat penyakit dahulu:)/gi, "\n$1")
       .replace(/\s+(Riwayat pengobatan:)/gi, "\n$1")
+      .replace(/(?:^|\n)(?:Faktor risiko|RPD|RPO|Riwayat penyakit dahulu|Riwayat pengobatan):\s*(?:-|tidak ada|nihil|tidak diketahui)?\s*(?=\n|$)/gi, "\n")
   );
 }
 
@@ -189,6 +279,8 @@ async function getEffectiveAiSettings() {
     "apiKey",
     "model",
     "provider",
+    "customProviderLabel",
+    "customBaseUrl",
   ]);
   const source = settings.apiKeySource || "admin";
   const hasPersonal = Boolean(settings.apiKey && settings.model && settings.provider);
@@ -198,6 +290,8 @@ async function getEffectiveAiSettings() {
       apiKey: settings.apiKey,
       model: settings.model,
       provider: settings.provider,
+      providerLabel: settings.customProviderLabel || "",
+      baseUrl: settings.customBaseUrl || "",
     };
   }
   const data = await knowledgeApi("get_ai_config");
@@ -212,7 +306,16 @@ async function getEffectiveAiSettings() {
   };
 }
 
-async function callProviderText({ provider, apiKey, model, prompt }) {
+function getProviderEndpoint(provider, baseUrl = "") {
+  return provider === "custom" ? baseUrl : PROVIDERS[provider]?.url || baseUrl;
+}
+
+function getProviderDisplay(provider, providerLabel = "") {
+  if (provider === "custom") return providerLabel || "Provider Lain";
+  return PROVIDERS[provider]?.label || provider || "Provider";
+}
+
+async function callProviderText({ provider, apiKey, model, prompt, baseUrl = "", providerLabel = "" }) {
   if (provider === "gemini") {
     const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(
       model
@@ -230,8 +333,8 @@ async function callProviderText({ provider, apiKey, model, prompt }) {
     return data?.candidates?.[0]?.content?.parts?.[0]?.text || "";
   }
 
-  const endpoint = PROVIDERS[provider]?.url;
-  if (!endpoint) throw new Error("Provider tidak dikenal: " + provider);
+  const endpoint = getProviderEndpoint(provider, baseUrl);
+  if (!endpoint) throw new Error("Endpoint " + getProviderDisplay(provider, providerLabel) + " belum diisi.");
   const res = await fetch(endpoint, {
     method: "POST",
     headers: {
@@ -245,27 +348,49 @@ async function callProviderText({ provider, apiKey, model, prompt }) {
     }),
   });
   if (!res.ok) throw new Error("API " + res.status + ": " + (await res.text()).slice(0, 200));
-  const data = await res.json();
+  const data = parseJsonResponse(await res.text());
   return data?.choices?.[0]?.message?.content || "";
 }
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
-  if (message?.type !== "IMPROVE_INLINE_FIELD") return undefined;
+  if (!["IMPROVE_INLINE_FIELD", "AI_POWERED_SOAP"].includes(message?.type)) return undefined;
 
   (async () => {
+    const ai = await getEffectiveAiSettings();
+
+    if (message.type === "AI_POWERED_SOAP") {
+      const targetDiagnosis = String(message.targetDiagnosis || "").trim();
+      if (!targetDiagnosis) throw new Error("Isi diagnosis target terlebih dahulu.");
+      const prompt = buildAiPoweredSoapPrompt({
+        targetDiagnosis,
+        pageData: message.pageData || {},
+        context: message.context || {},
+      });
+      const text =
+        ai.source === "admin"
+          ? await callAdminAiText(prompt, ai.adminUserSession)
+          : await callProviderText({
+              provider: ai.provider,
+              apiKey: ai.apiKey,
+              model: ai.model,
+              prompt,
+              baseUrl: ai.baseUrl,
+              providerLabel: ai.providerLabel,
+            });
+      sendResponse({ ok: true, data: normalizeAiPoweredSoapResult(parseJsonResponse(text)) });
+      return;
+    }
+
     const kind = message.kind === "ae" ? "ae" : "ab";
     const existingText = String(message.existingText || "").trim();
     const instruction = String(message.instruction || "").trim();
 
-    if (!instruction) {
-      throw new Error("Isi arahan terlebih dahulu.");
-    }
+    if (!instruction) throw new Error("Isi arahan terlebih dahulu.");
     if (!existingText) {
       throw new Error(kind === "ab" ? "Isi anamnesis terlebih dahulu." : "Isi pemeriksaan fisik terlebih dahulu.");
     }
 
     const prompt = buildImprovePrompt(kind, existingText, instruction);
-    const ai = await getEffectiveAiSettings();
     const text =
       ai.source === "admin"
         ? await callAdminAiText(prompt, ai.adminUserSession)
@@ -274,15 +399,14 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
             apiKey: ai.apiKey,
             model: ai.model,
             prompt,
+            baseUrl: ai.baseUrl,
+            providerLabel: ai.providerLabel,
           });
     const improvedText = postProcessImproveText(kind, text);
     if (!improvedText) throw new Error("Respons AI kosong.");
     sendResponse({ ok: true, text: improvedText });
   })().catch((error) => {
-    sendResponse({
-      ok: false,
-      error: error instanceof Error ? error.message : String(error),
-    });
+    sendResponse({ ok: false, error: error instanceof Error ? error.message : String(error) });
   });
 
   return true;

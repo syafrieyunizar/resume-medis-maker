@@ -13,10 +13,9 @@
         <button class="settings-button" data-tab="setting" type="button" aria-label="Buka setting">Setting</button>
       </div>
       <nav class="tabs" role="tablist">
-        <button class="tab is-active" data-tab="so" role="tab">SO</button>
+        <button class="tab is-active" data-tab="so" role="tab">SOAP</button>
         <button class="tab" data-tab="cppt" role="tab">CPPT</button>
         <button class="tab" data-tab="tindak-lanjut" role="tab">Penunjang</button>
-        <button class="tab" data-tab="analisa" role="tab">Analisa</button>
       </nav>
     </header>
 
@@ -274,10 +273,10 @@
         <div id="knowledgeStatus" class="status" hidden></div>
       </section>
 
-      <!-- SO -->
+      <!-- SOAP -->
       <section class="panel is-active" data-panel="so">
-        <p class="note">Klik tombol berikut untuk mengambil data Subjektif &amp; Objektif dari IGD</p>
-        <button id="pullSO" class="btn btn-primary">Tarik data S &amp; O</button>
+        <p class="note">Klik tombol berikut untuk mengambil data SOAP dari RM 07</p>
+        <button id="pullSO" class="btn btn-primary">Tarik data SOAP</button>
         <label class="field">
           <span class="label">Subjektif</span>
           <textarea id="soSubjektif" class="textarea" rows="8" placeholder="Tulis subjektif..."></textarea>
@@ -286,8 +285,23 @@
           <span class="label">Objektif</span>
           <textarea id="soObjektif" class="textarea" rows="8" placeholder="Tulis objektif..."></textarea>
         </label>
-        <p class="insert-guide">&darr; Tekan tombol dibawah untuk memasukkan semua data ke dalam resume medis &darr;</p>
-        <button id="insertSO" class="btn btn-primary">Masukkan S &amp; O ke Resume</button>
+        <label class="field">
+          <span class="label">Assessment</span>
+          <textarea id="soAssessment" class="textarea" rows="5" placeholder="Tulis assessment..."></textarea>
+        </label>
+        <label class="field">
+          <span class="label">Planning</span>
+          <textarea id="soPlanning" class="textarea" rows="5" placeholder="Tulis planning..."></textarea>
+        </label>
+        <label class="field">
+          <span class="label">Hasil Konsultasi</span>
+          <textarea id="soKonsultasi" class="textarea" rows="5" placeholder="Tulis hasil konsultasi..."></textarea>
+        </label>
+        <p class="insert-guide">&darr; Tekan tombol dibawah untuk memasukkan data ke resume medis atau RM 07 &darr;</p>
+        <div class="action-row">
+          <button id="insertSO" class="btn btn-primary">Masukkan S &amp; O ke Resume</button>
+          <button id="insertSOAPRM07" class="btn btn-outline">Masukkan SOAP ke RM 07</button>
+        </div>
       </section>
 
       <!-- CPPT -->
@@ -320,6 +334,7 @@
             <div id="cpptProgressText" class="progress-text">Menyiapkan CPPT...</div>
           </div>
           <div id="cpptStatus" class="status" hidden></div>
+          <div id="cpptDiagnosisReason" class="status cppt-dx-reason" hidden></div>
         </div>
 
         <div class="results" id="cpptResults" hidden>
@@ -343,6 +358,25 @@
             <span class="label">Diagnosa Sekunder</span>
             <textarea class="textarea" rows="3" data-key="dx_sekunder"></textarea>
           </div>
+          <details id="cpptDiagnosisSuggestBox" class="cppt-dx-suggestions" hidden>
+            <summary>Saran Diagnosis &#129504;</summary>
+            <div class="cppt-dx-suggestion-list">
+              <div id="cpptDxUtamaSuggest" class="cppt-ai-suggest" hidden>
+                <div>
+                  <span class="label">Diagnosis Utama</span>
+                  <div class="cppt-ai-suggest-text"></div>
+                </div>
+                <button class="btn btn-outline btn-small" type="button" data-dx-action="replace" data-source="cpptDxUtamaSuggest" data-target-key="dx_utama">Gunakan</button>
+              </div>
+              <div id="cpptDxSekunderSuggest" class="cppt-ai-suggest" hidden>
+                <div>
+                  <span class="label">Diagnosis Sekunder</span>
+                  <div class="cppt-ai-suggest-text"></div>
+                </div>
+                <button class="btn btn-outline btn-small" type="button" data-dx-action="replace" data-source="cpptDxSekunderSuggest" data-target-key="dx_sekunder">Gunakan</button>
+              </div>
+            </div>
+          </details>
           <div class="result-field">
             <span class="label">Konsultasi Bidang Lain</span>
             <textarea class="textarea" rows="3" data-key="konsul"></textarea>
@@ -351,6 +385,10 @@
             <span class="label">Terapi Saat Pulang</span>
             <textarea class="textarea" rows="3" data-key="terapi_pulang"></textarea>
           </div>
+          <details id="cpptGapsBox" class="cppt-gaps" hidden>
+            <summary>Kelengkapan CPPT: <span id="cpptGapsCount">0 catatan</span></summary>
+            <div id="cpptGapsList" class="cppt-gaps-list"></div>
+          </details>
           <p class="insert-guide">&darr; Tekan tombol dibawah untuk memasukkan semua data ke dalam resume medis &darr;</p>
           <button id="insertCPPT" class="btn btn-primary">Masukkan Semua Data ke Resume</button>
         </div>

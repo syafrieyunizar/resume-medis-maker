@@ -1,8 +1,15 @@
 .rmr-inline-wrap {
   align-items: flex-start;
   display: inline-flex;
+  flex-wrap: wrap;
   gap: 8px;
   width: 100%;
+}
+
+.rmr-inline-wrap > textarea {
+  flex: 1 1 auto !important;
+  min-width: 0;
+  width: auto !important;
 }
 
 .rmr-inline-trigger {
@@ -14,6 +21,7 @@
   color: #ffffff;
   cursor: pointer;
   display: inline-flex;
+  flex: 0 0 34px;
   font-size: 14px;
   font-weight: 700;
   height: 34px;
@@ -21,7 +29,9 @@
   line-height: 1;
   margin-top: 2px;
   min-width: 34px;
+  position: relative;
   transition: background 0.2s ease, color 0.2s ease, border-color 0.2s ease;
+  z-index: 2;
 }
 
 .rmr-inline-trigger:hover {
@@ -36,10 +46,12 @@
   border-radius: 10px;
   box-shadow: 0 10px 28px rgba(37, 99, 235, 0.18);
   display: flex;
+  flex: 1 0 100%;
   flex-direction: column;
   gap: 8px;
   margin-top: 8px;
   padding: 10px;
+  width: 100%;
 }
 
 .rmr-inline-panel[hidden] {
@@ -141,4 +153,68 @@
 .rmr-inline-note {
   color: #6b7280;
   font-size: 11px;
+}
+
+.rmr-ai-soap-root {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 8px 0;
+  width: 100%;
+}
+.rmr-ai-soap-main {
+  align-self: flex-start;
+}
+.rmr-ai-soap-reason {
+  background: #eff6ff;
+  border-radius: 8px;
+  color: #1e3a8a;
+  font-size: 12px;
+  line-height: 1.45;
+  padding: 8px 10px;
+}
+.rmr-ai-soap-reason[hidden],
+.rmr-ai-soap-draft[hidden],
+.rmr-ai-soap-confirmations[hidden] {
+  display: none;
+}
+.rmr-ai-soap-draft,
+.rmr-ai-soap-confirmations {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.rmr-ai-soap-field,
+.rmr-ai-soap-check {
+  color: #1f2937;
+  font-size: 12px;
+}
+.rmr-ai-soap-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.rmr-ai-soap-field span {
+  color: #1e3a8a;
+  font-weight: 700;
+}
+.rmr-ai-soap-field textarea {
+  border: 1px solid #bfdbfe;
+  border-radius: 8px;
+  font-family: inherit;
+  font-size: 13px;
+  line-height: 1.5;
+  padding: 8px 10px;
+  resize: vertical;
+  width: 100%;
+}
+.rmr-ai-soap-check {
+  align-items: flex-start;
+  background: #f9fafb;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  display: flex;
+  gap: 8px;
+  line-height: 1.45;
+  padding: 8px 10px;
 }

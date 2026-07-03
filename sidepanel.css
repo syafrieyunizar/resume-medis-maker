@@ -650,3 +650,72 @@ body.is-admin-mode .settings-button {
   line-height: 1.55;
   margin: 10px 0 0;
 }
+
+.cppt-ai-suggest {
+  align-items: flex-start;
+  background: var(--whisper-white);
+  border: 1px solid var(--cloud-gray);
+  border-radius: 8px;
+  display: flex;
+  gap: 8px;
+  justify-content: space-between;
+  padding: 8px 10px;
+}
+.cppt-ai-suggest[hidden] { display: none; }
+.cppt-ai-suggest-text {
+  color: var(--ink-solid);
+  font-size: 12px;
+  line-height: 1.4;
+  margin-top: 2px;
+  overflow-wrap: anywhere;
+}
+.cppt-dx-reason {
+  line-height: 1.5;
+}
+.cppt-gaps {
+  border: 1px solid var(--cloud-gray);
+  border-radius: 8px;
+  padding: 8px 10px;
+}
+.cppt-gaps[hidden] { display: none; }
+.cppt-gaps summary {
+  color: var(--ink-solid);
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 700;
+}
+.cppt-gaps-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 8px;
+}
+.cppt-gap-item {
+  background: var(--whisper-white);
+  border-radius: 8px;
+  color: var(--subtle-gray);
+  font-size: 12px;
+  line-height: 1.45;
+  padding: 8px;
+}
+.cppt-gap-item strong {
+  color: var(--ink-solid);
+}
+.cppt-dx-suggestions {
+  border: 1px solid var(--cloud-gray);
+  border-radius: 8px;
+  padding: 8px 10px;
+}
+.cppt-dx-suggestions[hidden] { display: none; }
+.cppt-dx-suggestions summary {
+  color: var(--ink-solid);
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 700;
+}
+.cppt-dx-suggestion-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 8px;
+}
