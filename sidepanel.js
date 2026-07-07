@@ -43,6 +43,7 @@ function activatePanel(target) {
     panel.classList.toggle("is-active", active);
     panel.hidden = !active;
   });
+  queueAutoGrowTextareas();
   scheduleDraftSave();
 }
 
@@ -66,6 +67,22 @@ function wait(ms) {
 
 function normalizeErmText(value) {
   return String(value || "").replace(/[→⇒➔➜➝➞]/g, "->");
+}
+
+function autoGrowTextarea(element) {
+  if (!(element instanceof HTMLTextAreaElement)) return;
+  element.style.overflow = "hidden";
+  element.style.resize = "none";
+  element.style.height = "auto";
+  element.style.height = `${element.scrollHeight}px`;
+}
+
+function autoGrowTextareas(root = document) {
+  root.querySelectorAll?.("textarea").forEach(autoGrowTextarea);
+}
+
+function queueAutoGrowTextareas(root = document) {
+  requestAnimationFrame(() => autoGrowTextareas(root));
 }
 
 function createAiProgress({ panel, bar, text, status, mirrorLoadingToStatus = true }) {
@@ -362,6 +379,7 @@ function collectCpptResultFields() {
 function fillCpptResultFields(values = {}) {
   $$("#cpptResults textarea").forEach((ta) => {
     ta.value = normalizeErmText(values[ta.dataset.key] || "");
+    autoGrowTextarea(ta);
   });
 }
 
@@ -599,6 +617,7 @@ function applyDraftData(data = {}) {
     }
   } finally {
     state.draftRestoring = false;
+    queueAutoGrowTextareas();
   }
 }
 
@@ -657,6 +676,7 @@ function resetSidepanelWorkspace() {
     if (claimProgressText) claimProgressText.textContent = "Menyiapkan analisa...";
   } finally {
     state.draftRestoring = false;
+    queueAutoGrowTextareas();
   }
 }
 
@@ -778,10 +798,12 @@ function updateCpptPenunjangLinked(value) {
   if (!state.cpptPenunjang) {
     field.hidden = true;
     textarea.value = "";
+    autoGrowTextarea(textarea);
     scheduleDraftSave();
     return;
   }
   textarea.value = state.cpptPenunjang;
+  autoGrowTextarea(textarea);
   field.hidden = false;
   scheduleDraftSave();
 }
@@ -2319,6 +2341,7 @@ function clearCpptResultFields() {
   if (results) results.hidden = true;
   $$("#cpptResults textarea").forEach((ta) => {
     ta.value = "";
+    autoGrowTextarea(ta);
   });
   updateCpptPenunjangLinked("");
   renderCpptDiagnosisSupport({});
@@ -3369,8 +3392,8 @@ pullSOButton.addEventListener("click", async () => {
     });
 
     if (!result?.ok) {
-      setButtonState(pullSOButton, "error", "Pastikan sudah berada di halaman RM 07");
-      toast("Pastikan sudah berada di halaman RM 07", "error");
+      setButtonState(pullSOButton, "error", "Pastikan sudah berada di halaman kajian dokter IGD");
+      toast("Pastikan sudah berada di halaman kajian dokter IGD", "error");
       return;
     }
 
@@ -3380,12 +3403,13 @@ pullSOButton.addEventListener("click", async () => {
     $("#soPlanning").value = result.planning || "";
     $("#soKonsultasi").value = result.konsultasi || "";
     state.soapVitals = result.vitals || {};
+    queueAutoGrowTextareas();
     scheduleDraftSave();
     setButtonState(pullSOButton, "success", "Data SOAP Ditarik");
     toast("Data SOAP berhasil ditarik", "success");
   } catch (e) {
     console.error(e);
-    setButtonState(pullSOButton, "error", "Pastikan sudah berada di halaman RM 07");
+    setButtonState(pullSOButton, "error", "Pastikan sudah berada di halaman kajian dokter IGD");
     toast("Gagal: " + e.message, "error");
   }
 });
@@ -3475,12 +3499,12 @@ insertSOAPRM07Button?.addEventListener("click", async () => {
       setButtonState(insertSOAPRM07Button, "success", "SOAP Masuk ke RM 07");
       toast("SOAP dimasukkan ke RM 07", "success");
     } else {
-      setButtonState(insertSOAPRM07Button, "error", "Pastikan sudah berada di halaman RM 07");
-      toast("Pastikan sudah berada di halaman RM 07", "error");
+      setButtonState(insertSOAPRM07Button, "error", "Pastikan sudah berada di halaman kajian dokter IGD");
+      toast("Pastikan sudah berada di halaman kajian dokter IGD", "error");
     }
   } catch (e) {
     console.error(e);
-    setButtonState(insertSOAPRM07Button, "error", "Pastikan sudah berada di halaman RM 07");
+    setButtonState(insertSOAPRM07Button, "error", "Pastikan sudah berada di halaman kajian dokter IGD");
     toast("Gagal: " + e.message, "error");
   }
 });
@@ -3488,6 +3512,28 @@ insertSOAPRM07Button?.addEventListener("click", async () => {
 $("#cpptResults")?.addEventListener("click", (event) => {
   const button = event.target.closest?.("[data-dx-action]");
   if (button) applyCpptDiagnosisSuggestion(button);
+});
+
+$("#usePenunjangSummaryForCppt")?.addEventListener("click", (event) => {
+  const button = event.currentTarget;
+  const value = normalizeErmText($("#penunjangSummary")?.value || "").trim();
+  const target = $('#cpptResults textarea[data-key="penunjang"]');
+  if (!value || !target) {
+    toast("Belum ada penunjang yang bisa dimasukkan", "error");
+    return;
+  }
+  target.value = value;
+  target.dispatchEvent(new Event("input", { bubbles: true }));
+  updateCpptPenunjangLinked(value);
+  button.classList.remove("btn-outline");
+  button.classList.add("btn-success");
+  button.textContent = "Sudah masuk ke Tab CPPT";
+  clearTimeout(button._stateTimer);
+  button._stateTimer = setTimeout(() => {
+    button.classList.remove("btn-success");
+    button.classList.add("btn-outline");
+    button.textContent = "Gunakan";
+  }, 2500);
 });
 
 // ---------------- CPPT: Akses ----------------
@@ -3803,6 +3849,7 @@ ATURAN SARAN DIAGNOSIS:
     updateCpptControls();
     $$("#cpptResults textarea").forEach((ta) => {
       ta.value = normalizeErmText(normalized[ta.dataset.key] ?? "");
+      autoGrowTextarea(ta);
     });
     updateCpptPenunjangLinked(normalized.penunjang);
     renderCpptDiagnosisSupport(normalized);
@@ -4134,6 +4181,7 @@ summarizePenunjangBtn.addEventListener("click", async () => {
 
     await progress.setProgress("Menyusun rangkuman penunjang...", 94);
     $("#penunjangSummary").value = formatPenunjangSummary(summary);
+    queueAutoGrowTextareas();
     scheduleDraftSave();
     progress.complete("Selesai. Rangkuman dapat diedit di field Pemeriksaan Penunjang Bermakna.");
     toast("Rangkuman penunjang selesai", "success");
@@ -4325,6 +4373,7 @@ $("#analyzeClaimBpjs").addEventListener("click", async () => {
 document.addEventListener("input", (event) => {
   const target = event.target;
   if (!(target instanceof HTMLElement)) return;
+  autoGrowTextarea(target);
   if (
     target.matches(
       "#soSubjektif, #soObjektif, #soAssessment, #soPlanning, #soKonsultasi, #penunjangSummary, #cpptResults textarea"
@@ -4347,6 +4396,8 @@ $("#clearPatientDraft")?.addEventListener("click", () => {
     toast("Gagal menghapus draft", "error");
   });
 });
+
+queueAutoGrowTextareas();
 
 initDraftSystem().catch((error) => {
   console.error("Gagal memulai autosave draft", error);

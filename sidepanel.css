@@ -272,6 +272,26 @@ body.is-admin-mode .settings-button {
   color: var(--slate-gray);
   letter-spacing: -0.01em;
 }
+.panel:not([data-panel="setting"]) .field > .label,
+.result-field > .label {
+  align-items: center;
+  color: var(--ink-solid);
+  display: flex;
+  gap: 10px;
+  letter-spacing: 0;
+  margin: 4px 0 2px;
+  text-align: center;
+}
+.panel:not([data-panel="setting"]) .field > .label::before,
+.panel:not([data-panel="setting"]) .field > .label::after,
+.result-field > .label::before,
+.result-field > .label::after {
+  background: var(--ink-solid);
+  content: "";
+  flex: 1;
+  height: 2px;
+  min-width: 18px;
+}
 .hint { font-size: 11px; color: var(--ash-gray); }
 .inline-actions {
   display: flex;
@@ -291,8 +311,12 @@ body.is-admin-mode .settings-button {
   outline: none;
   transition: border-color 0.15s, box-shadow 0.15s;
 }
-.textarea { resize: vertical; min-height: 80px; line-height: 1.5; }
+.textarea { min-height: 80px; line-height: 1.5; overflow: hidden; resize: none; }
 .textarea-long { min-height: 180px; }
+.use-penunjang-cppt {
+  align-self: flex-end;
+  margin-top: -2px;
+}
 .input:focus, .textarea:focus {
   border-color: var(--electric-violet);
   box-shadow: 0 0 0 3px rgba(123, 104, 238, 0.15);

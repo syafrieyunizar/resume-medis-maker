@@ -20,10 +20,27 @@
     return /\/resumepulang\//i.test(location.href) || /\/pemeriksaanranap\//i.test(location.href);
   }
 
+  function autoGrowTextarea(element) {
+    if (!(element instanceof HTMLTextAreaElement)) return;
+    element.style.overflow = "hidden";
+    element.style.resize = "none";
+    element.style.height = "auto";
+    element.style.height = `${element.scrollHeight}px`;
+  }
+
+  function autoGrowTextareas(root = document) {
+    root.querySelectorAll?.("textarea").forEach(autoGrowTextarea);
+  }
+
+  function queueAutoGrowTextareas(root = document) {
+    requestAnimationFrame(() => autoGrowTextareas(root));
+  }
+
   function setValue(element, value) {
     const proto = Object.getPrototypeOf(element);
     const setter = Object.getOwnPropertyDescriptor(proto, "value")?.set;
     setter ? setter.call(element, value) : (element.value = value);
+    autoGrowTextarea(element);
     element.dispatchEvent(new Event("input", { bubbles: true }));
     element.dispatchEvent(new Event("change", { bubbles: true }));
   }
@@ -126,6 +143,7 @@
       textarea.dataset.soapDraft = field;
       textarea.rows = 3;
       textarea.value = String(draft[field] || "");
+      autoGrowTextarea(textarea);
       label.append(title, textarea);
       draftBox.append(label);
     });
@@ -146,6 +164,7 @@
       confirmBox.append(label);
     });
     root.querySelector(".rmr-ai-soap-apply").hidden = false;
+    queueAutoGrowTextareas(root);
   }
 
   function applyAiSoapResult(root) {
@@ -192,6 +211,7 @@
     root.append(button, panel);
     const anchor = subjektif.closest("label, .form-group, .row, tr") || subjektif;
     anchor.parentNode.insertBefore(root, anchor);
+    queueAutoGrowTextareas(root);
 
     const status = panel.querySelector(".rmr-inline-status");
     const showStatus = (message, kind) => {
@@ -302,6 +322,7 @@
     actions.append(improveButton, applyButton, cancelButton);
     panel.append(title, instruction, status, previewLabel, preview, note, actions);
     wrapper.appendChild(panel);
+    queueAutoGrowTextareas(wrapper);
 
     function showStatus(message, kind) {
       status.hidden = false;
@@ -313,6 +334,7 @@
       preview.hidden = true;
       previewLabel.hidden = true;
       preview.value = "";
+      autoGrowTextarea(preview);
       applyButton.hidden = true;
     }
 
@@ -364,6 +386,7 @@
         }
 
         preview.value = response.text || "";
+        autoGrowTextarea(preview);
         preview.hidden = false;
         previewLabel.hidden = false;
         applyButton.hidden = false;
@@ -389,8 +412,13 @@
     if (!isEligiblePage()) return;
     TARGETS.forEach(createFieldUi);
     createAiPoweredSoapUi();
+    queueAutoGrowTextareas();
   }
 
+
+  document.addEventListener("input", (event) => {
+    autoGrowTextarea(event.target);
+  });
   const observer = new MutationObserver(() => boot());
   observer.observe(document.documentElement, { childList: true, subtree: true });
   boot();

@@ -74,7 +74,8 @@
   line-height: 1.5;
   outline: none;
   padding: 8px 10px;
-  resize: vertical;
+  overflow: hidden;
+  resize: none;
   width: 100%;
 }
 
@@ -205,7 +206,8 @@
   font-size: 13px;
   line-height: 1.5;
   padding: 8px 10px;
-  resize: vertical;
+  overflow: hidden;
+  resize: none;
   width: 100%;
 }
 .rmr-ai-soap-check {
