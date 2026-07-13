@@ -185,7 +185,6 @@ function sanitizeAiConfig(config: Record<string, unknown>, appId: string, existi
   if (!apiKey) throw new Error("API key admin wajib diisi");
   if (!model) throw new Error("Model admin wajib diisi");
   return {
-    id: appId,
     app_id: appId,
     provider,
     provider_label: providerLabel || PROVIDER_LABELS[provider] || provider,
@@ -443,7 +442,6 @@ async function resetAdminAiProvider(appId: string, provider: string) {
   );
   const providerConfig = providerRows?.[0] || { ...existing, ...patch };
   const mirrorConfig = {
-    id: appId,
     app_id: appId,
     provider: existing.provider,
     provider_label: existing.provider_label || null,

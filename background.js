@@ -15,26 +15,75 @@ const PROVIDERS = {
   x5lab: { label: "X5Lab", url: "https://api.x5lab.dev/v1/chat/completions" },
 };
 
-function buildImprovePrompt(kind, existingText, instruction) {
+function buildImproveQuestionsPrompt(kind, existingText, instruction, anamnesisText = "") {
+  const isAnamnesis = kind === "ab";
+  return [
+    `Buat pertanyaan konfirmasi singkat dan contoh jawaban untuk dokter sebelum AI memperbaiki ${isAnamnesis ? "anamnesis" : "pemeriksaan fisik"}.`,
+    "Gunakan format persis berikut:",
+    "PERTANYAAN:",
+    "1. ...",
+    "2. ...",
+    "",
+    "CONTOH JAWABAN:",
+    "...",
+    "",
+    isAnamnesis
+      ? "Pertanyaan harus mencakup gejala, onset, derajat keparahan, gejala penyerta, dan tanda kegawatdaruratan yang relevan dengan arahan."
+      : "Pertanyaan harus mencakup temuan objektif dan tanda vital yang perlu diperiksa. Jangan menyimpulkan temuan positif dari diagnosis atau anamnesis.",
+    "Batasi 3-7 pertanyaan yang paling bermakna.",
+    "Contoh jawaban harus satu baris, sangat singkat, padat, tepat, dan bergaya catatan medis dokter.",
+    isAnamnesis
+      ? "Khusus anamnesis: tulis hanya keluhan subjektif, onset, perjalanan penyakit, gejala penyerta, dan derajat keluhan. Jangan masukkan tanda vital, hasil pemeriksaan fisik, diagnosis, atau interpretasi."
+      : "Khusus pemeriksaan fisik: tulis hanya temuan objektif dan tanda vital. Jangan masukkan keluhan, onset, perjalanan penyakit, diagnosis, atau interpretasi.",
+    isAnamnesis
+      ? "Contoh gaya: Batuk berdahak hijau sejak 3 hari, demam (+), sesak memberat sejak pagi, sulit bicara kalimat panjang."
+      : "Contoh gaya: KU tampak sesak, RR 30 x/menit, SpO2 88% RA, retraksi (+), Rh +/+.",
+    "Gunakan singkatan medis yang lazim, misalnya SpO2, RR, RA, TD, HR, Rh, Wh, dan CRT.",
+    "Jangan menulis kesimpulan atau kalimat tambahan seperti sehingga, mengarah ke, mendukung, dicurigai, perlu dikonfirmasi, atau sesuai pneumonia berat.",
+    "Jangan gunakan daftar, nomor, placeholder, tanda kurung siku, pembuka, penutup, atau penjelasan tambahan pada contoh jawaban.",
+    "Contoh jawaban bersifat hipotetis, bukan data pasien, dan wajib disesuaikan dokter sebelum digunakan.",
+    "",
+    `${isAnamnesis ? "ANAMNESIS" : "PEMERIKSAAN FISIK"} SAAT INI:`,
+    existingText,
+    ...(isAnamnesis ? [] : ["", "KONTEKS ANAMNESIS:", anamnesisText || "Tidak tersedia"]),
+    "",
+    "ARAHAN USER:",
+    instruction,
+  ].join("\n");
+}
+
+function parseImproveQuestionsResponse(text) {
+  const value = normalizeSpacing(text);
+  const marker = value.match(/(?:^|\n)(?:CONTOH|SARAN) JAWABAN:\s*/i);
+  if (!marker) {
+    return { questions: value.replace(/^PERTANYAAN:\s*/i, "").trim(), suggestedAnswer: "" };
+  }
+  return {
+    questions: value.slice(0, marker.index).replace(/^PERTANYAAN:\s*/i, "").trim(),
+    suggestedAnswer: value.slice(marker.index + marker[0].length).replace(/\s*\n+\s*/g, " ").replace(/\bsaturasi oksigen\b/gi, "SpO2").replace(/\budara ruangan\b/gi, "RA").replace(/\bfrekuensi napas\b/gi, "RR").replace(/\s+(?:sehingga\s+)?(?:perlu dikonfirmasi|mengarah ke|mendukung diagnosis|dicurigai sebagai|sesuai dengan)\b.*$/i, "").trim(),
+  };
+}
+function buildImprovePrompt(kind, existingText, instruction, confirmation, anamnesisText = "") {
   const isAnamnesis = kind === "ab";
   const roleTitle = isAnamnesis ? "anamnesis" : "pemeriksaan fisik";
   const guidance = isAnamnesis
     ? [
-        "- Pertahankan isi asli yang sudah ada.",
-        "- Hanya buat draft penyesuaian pada keluhan, perjalanan penyakit, dan gejala penyerta yang relevan dengan arahan user.",
-        "- Jangan menambahkan faktor risiko, RPD, RPO, riwayat alergi, atau riwayat lain bila tidak ada pada teks awal atau tidak disebut eksplisit oleh user.",
+        "- Pertahankan isi asli yang sudah ada dengan cara mengambil bagian-bagian penting isi dari anamnesis agar tidak terlalu berbeda.",
+        "- Buat kegawatdaruratan yang sesuai dengan satu atau lebih kriteria berikut: a) mengancam nyawa, membahayakan diri dan orang lain/lingkungan; b) adanya gangguan pada jalan napas, pernapasan, dan sirkulasi; c) adanya penurunan kesadaran; d) adanya gangguan hemodinamik; dan/atau e) memerlukan tindakan segera. Sesuaikan dengan arahan user.",
+        "- Integrasikan gejala, tanda, atau perjalanan penyakit yang sudah ada dan yang dikonfirmasi dokter pada JAWABAN KONFIRMASI.",
+        "- Jangan mengubah pertanyaan/saran AI menjadi fakta bila tidak dikonfirmasi dokter.",
         "- Fokus pada keluhan, perjalanan penyakit, gejala penyerta, atau tanda yang mendukung arah diagnosis.",
         "- Gunakan bahasa singkat, padat, gaya catatan medis dokter.",
         "- Output hanya teks anamnesis akhir.",
-        "- Tulis hasil rapi dengan pemisahan baris.",
-        "- Paragraf utama berisi keluhan dan perjalanan penyakit.",
+        "- Tunjukkan kegawatdaruratan hanya melalui gejala, onset, derajat keluhan, atau keterbatasan fungsi yang konkret. Jangan jelaskan interpretasinya.",
         "- Jika Faktor risiko/RPD/RPO sudah ada pada teks awal atau disebut eksplisit oleh user, pertahankan dan rapikan pada baris sendiri.",
         "- Jika Faktor risiko/RPD/RPO tidak ada, jangan tuliskan section tersebut.",
       ].join("\n")
     : [
         "- Pertahankan isi asli yang sudah ada.",
-        "- Hanya buat draft penyesuaian pada pemeriksaan fisik yang relevan dengan arahan user.",
-        "- Fokus pada temuan objektif singkat yang mendukung arah diagnosis, misalnya konjungtiva pucat (+), akral dingin, CRT, ronki, wheezing, edema, dll bila relevan.",
+        "- Gunakan anamnesis hanya sebagai konteks untuk memilih bagian pemeriksaan yang relevan.",
+        "- Tambahkan atau ubah temuan objektif hanya jika dikonfirmasi dokter pada JAWABAN KONFIRMASI.",
+        "- Diagnosis atau gejala subjektif tidak membuktikan RR meningkat, ronki, wheezing, edema, atau temuan objektif lainnya.",
         "- Gunakan bahasa singkat, padat, gaya catatan medis dokter.",
         "- Output hanya teks pemeriksaan fisik akhir.",
         "- Gunakan format section tetap berikut dan isi seperlunya:",
@@ -60,10 +109,12 @@ function buildImprovePrompt(kind, existingText, instruction) {
         "Akral hangat +/+",
         "Edema -/-",
         "",
-        "- Jika arahan misalnya pneumonia, cukup ubah bagian paru/thorax yang relevan seperti Rh atau Wh. Jangan membuat temuan positif yang tidak perlu di section lain.",
+        "- Jika arahan misalnya pneumonia, ubah bagian paru/thorax hanya berdasarkan temuan yang dikonfirmasi dokter.",
       ].join("\n");
 
-  return `Kamu membantu dokter memperbaiki dokumentasi ${roleTitle} resume medis.
+  return `${isAnamnesis
+    ? "Kamu membantu dokter memperbaiki dokumentasi anamnesis resume medis menjadi sebuah anamnesis dengan kegawatdaruratan agar dapat diklaim BPJS Kesehatan."
+    : `Kamu membantu dokter memperbaiki dokumentasi ${roleTitle} resume medis.`}
 
 TUGAS:
 ${guidance}
@@ -71,15 +122,24 @@ ${guidance}
 ARAHAN PENTING:
 - User boleh memberi arah diagnosis atau fokus perbaikan, misalnya anemia, dehidrasi, pneumonia.
 - Perbaikan ditujukan agar dokumentasi lebih kuat secara klinis dan lebih mendukung kelengkapan resume/klaim.
+- Kegawatdaruratan hanya boleh terlihat dari gejala atau temuan konkret yang didukung teks awal atau jawaban konfirmasi dokter.
+- Jangan menulis diagnosis, interpretasi, kesimpulan klinis, alasan klaim, atau kalimat tentang perlunya evaluasi, pemeriksaan, penanganan, maupun tatalaksana.
+- Jangan memakai frasa seperti mengarah ke, mengarah pada, mendukung diagnosis, dicurigai sebagai, sesuai dengan, sehingga perlu, atau memerlukan tatalaksana.
+- Akhiri output pada gejala atau temuan klinis terakhir.
 - Jangan menulis penjelasan, jangan markdown, jangan bullet.
 
 ${isAnamnesis ? "ANAMNESIS SAAT INI" : "PEMERIKSAAN FISIK SAAT INI"}:
 ${existingText}
 
+${isAnamnesis ? "" : `KONTEKS ANAMNESIS:
+${anamnesisText || "Tidak tersedia"}
+`}
 ARAHAN USER:
-${instruction}`;
-}
+${instruction}
 
+JAWABAN KONFIRMASI DOKTER:
+${confirmation}`;
+}
 function findFirstJsonObject(text) {
   const source = String(text || "");
   const start = source.indexOf("{");
@@ -115,57 +175,6 @@ function parseJsonResponse(text) {
     if (firstObject) return JSON.parse(firstObject);
     throw error;
   }
-}
-
-function normalizeArray(value) {
-  return Array.isArray(value) ? value : [];
-}
-
-function normalizeAiPoweredSoapResult(value) {
-  const data = value && typeof value === "object" ? value : {};
-  const draft = data.draft && typeof data.draft === "object" ? data.draft : {};
-  return {
-    draft: {
-      subjektif: String(draft.subjektif || ""),
-      objektif: String(draft.objektif || ""),
-      assessment: String(draft.assessment || draft.assesment || ""),
-      planning: String(draft.planning || ""),
-      vitals: draft.vitals && typeof draft.vitals === "object" ? draft.vitals : {},
-    },
-    confirmations: normalizeArray(data.confirmations)
-      .map((item) => ({
-        label: String(item?.label || "").trim(),
-        target_field: String(item?.target_field || "").trim().toLowerCase(),
-        insert_text: String(item?.insert_text || "").trim(),
-      }))
-      .filter((item) => item.label && item.target_field && item.insert_text),
-    reason: String(data.reason || "").trim(),
-  };
-}
-
-function buildAiPoweredSoapPrompt({ targetDiagnosis, pageData, context }) {
-  return [
-    "Kamu membantu dokter membuat draft SOAP dari data rekam medis yang tersedia.",
-    "",
-    "ATURAN WAJIB:",
-    "- Output hanya JSON valid, tanpa markdown.",
-    "- Draft SOAP hanya boleh memakai data yang sudah tersedia pada PAGE_DATA atau CONTEXT.",
-    "- Data yang belum terdokumentasi harus masuk ke confirmations sebagai pertanyaan konfirmasi dokter, bukan langsung sebagai fakta di draft.",
-    "- confirmations harus relevan dengan DIAGNOSIS_TARGET dan berisi teks yang akan ditambahkan bila dokter mencentang.",
-    "- Gunakan bahasa Indonesia, singkat, padat, gaya catatan dokter.",
-    "",
-    "FORMAT JSON:",
-    "{\"draft\":{\"subjektif\":\"\",\"objektif\":\"\",\"assessment\":\"\",\"planning\":\"\",\"vitals\":{}},\"confirmations\":[{\"label\":\"\",\"target_field\":\"subjektif|objektif|assessment|planning\",\"insert_text\":\"\"}],\"reason\":\"\"}",
-    "",
-    "DIAGNOSIS_TARGET:",
-    targetDiagnosis,
-    "",
-    "PAGE_DATA:",
-    JSON.stringify(pageData || {}),
-    "",
-    "CONTEXT:",
-    JSON.stringify(context || {}),
-  ].join("\n");
 }
 
 function normalizeSpacing(text) {
@@ -210,10 +219,18 @@ function formatImproveObjective(text) {
   return value;
 }
 
-function postProcessImproveText(kind, text) {
-  return kind === "ab" ? formatImproveAnamnesis(text) : formatImproveObjective(text);
+function stripClinicalConclusions(text) {
+  return String(text || "")
+    .replace(/(?:,?\s+|\.\s*)(?:yang\s+)?(?:mengarah(?:\s+(?:ke|pada))?|mendukung(?:\s+diagnosis)?|dicurigai(?:\s+sebagai)?|sesuai\s+dengan)\s+[^.\n]*(?:\.|$)/gi, ".")
+    .replace(/(?:,?\s+|\.\s*)(?:sehingga\s+)?(?:memerlukan|perlu)\s+(?:evaluasi|tatalaksana|penanganan|pemeriksaan|konfirmasi)[^.\n]*(?:\.|$)/gi, ".")
+    .replace(/[ \t]+\./g, ".")
+    .replace(/\.{2,}/g, ".");
 }
 
+function postProcessImproveText(kind, text) {
+  const cleaned = stripClinicalConclusions(text);
+  return kind === "ab" ? formatImproveAnamnesis(cleaned) : formatImproveObjective(cleaned);
+}
 async function knowledgeApi(action, payload = {}) {
   const response = await fetch(KNOWLEDGE_FUNCTION_URL, {
     method: "POST",
@@ -353,20 +370,24 @@ async function callProviderText({ provider, apiKey, model, prompt, baseUrl = "",
 }
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
-  if (!["IMPROVE_INLINE_FIELD", "AI_POWERED_SOAP"].includes(message?.type)) return undefined;
+  if (message?.type !== "IMPROVE_INLINE_FIELD") return undefined;
 
   (async () => {
     const ai = await getEffectiveAiSettings();
+    const kind = message.kind === "ae" ? "ae" : "ab";
+    const existingText = String(message.existingText || "").trim();
+    const instruction = String(message.instruction || "").trim();
+    const confirmation = String(message.confirmation || "").trim();
+    const anamnesisText = String(message.anamnesisText || "").trim();
 
-    if (message.type === "AI_POWERED_SOAP") {
-      const targetDiagnosis = String(message.targetDiagnosis || "").trim();
-      if (!targetDiagnosis) throw new Error("Isi diagnosis target terlebih dahulu.");
-      const prompt = buildAiPoweredSoapPrompt({
-        targetDiagnosis,
-        pageData: message.pageData || {},
-        context: message.context || {},
-      });
-      const text =
+    if (!instruction) throw new Error("Isi arahan terlebih dahulu.");
+    if (!existingText) {
+      throw new Error(kind === "ab" ? "Isi anamnesis terlebih dahulu." : "Isi pemeriksaan fisik terlebih dahulu.");
+    }
+
+    if (message.phase === "questions") {
+      const prompt = buildImproveQuestionsPrompt(kind, existingText, instruction, anamnesisText);
+      const rawResponse =
         ai.source === "admin"
           ? await callAdminAiText(prompt, ai.adminUserSession)
           : await callProviderText({
@@ -377,20 +398,15 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
               baseUrl: ai.baseUrl,
               providerLabel: ai.providerLabel,
             });
-      sendResponse({ ok: true, data: normalizeAiPoweredSoapResult(parseJsonResponse(text)) });
+      const result = parseImproveQuestionsResponse(rawResponse);
+      if (!result.questions) throw new Error("Pertanyaan konfirmasi kosong.");
+      sendResponse({ ok: true, ...result });
       return;
     }
 
-    const kind = message.kind === "ae" ? "ae" : "ab";
-    const existingText = String(message.existingText || "").trim();
-    const instruction = String(message.instruction || "").trim();
+    if (!confirmation) throw new Error("Isi jawaban konfirmasi dokter terlebih dahulu.");
 
-    if (!instruction) throw new Error("Isi arahan terlebih dahulu.");
-    if (!existingText) {
-      throw new Error(kind === "ab" ? "Isi anamnesis terlebih dahulu." : "Isi pemeriksaan fisik terlebih dahulu.");
-    }
-
-    const prompt = buildImprovePrompt(kind, existingText, instruction);
+    const prompt = buildImprovePrompt(kind, existingText, instruction, confirmation, anamnesisText);
     const text =
       ai.source === "admin"
         ? await callAdminAiText(prompt, ai.adminUserSession)

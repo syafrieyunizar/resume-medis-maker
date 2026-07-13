@@ -1,6 +1,5 @@
 const $ = (sel) => document.querySelector(sel);
 const $$ = (sel) => document.querySelectorAll(sel);
-const AI_POWERED_SOAP_PREFIX = "aiPoweredSoap:";
 
 const state = {
   cpptMode: "",
@@ -483,46 +482,6 @@ function renderCpptDiagnosisSupport(data = {}) {
   });
 }
 
-function hasSoapData(soap = {}) {
-  return [soap.subjektif, soap.objektif, soap.assessment, soap.planning].some((value) => String(value || "").trim());
-}
-
-function buildAiPoweredSoapContext(data) {
-  const cpptResults = data.cppt?.results || {};
-  const penunjangSummary = data.penunjang?.summary || "";
-  return {
-    patientId: state.draftPatientId,
-    updatedAt: new Date().toISOString(),
-    soapReady: hasSoapData(data.so),
-    cpptReady: Boolean(data.cppt?.resultReady),
-    penunjangReady: Boolean(penunjangSummary || data.penunjang?.files?.length),
-    context: {
-      soap: data.so || {},
-      cppt: {
-        summary: data.cppt?.summary || null,
-        penunjang: data.cppt?.penunjang || "",
-        results: cpptResults,
-        audit: data.cppt?.audit || {},
-      },
-      penunjang: {
-        summary: penunjangSummary,
-      },
-    },
-  };
-}
-
-async function saveAiPoweredSoapContext(data) {
-  if (!state.draftPatientId) return;
-  await chrome.storage.local.set({
-    [AI_POWERED_SOAP_PREFIX + state.draftPatientId]: buildAiPoweredSoapContext(data),
-  });
-}
-
-async function clearAiPoweredSoapContext() {
-  if (!state.draftPatientId) return;
-  await chrome.storage.local.remove(AI_POWERED_SOAP_PREFIX + state.draftPatientId);
-}
-
 function collectDraftData() {
   return {
     version: 1,
@@ -566,7 +525,6 @@ async function saveCurrentDraftNow() {
     updatedAt,
     data,
   });
-  await saveAiPoweredSoapContext(data);
   state.draftLastSavedAt = updatedAt;
   updateDraftUi(`Tersimpan otomatis ${formatDraftTime(updatedAt)}. Draft tersimpan lokal di browser ini.`);
 }
@@ -725,7 +683,6 @@ async function clearCurrentPatientDraft() {
   clearTimeout(state.draftSaveTimer);
   state.draftRestoring = true;
   await deleteDraftRecord(state.draftKey);
-  await clearAiPoweredSoapContext();
   try {
     resetSidepanelWorkspace();
   } finally {
@@ -3499,13 +3456,13 @@ insertSOAPRM07Button?.addEventListener("click", async () => {
       setButtonState(insertSOAPRM07Button, "success", "SOAP Masuk ke RM 07");
       toast("SOAP dimasukkan ke RM 07", "success");
     } else {
-      setButtonState(insertSOAPRM07Button, "error", "Pastikan sudah berada di halaman kajian dokter IGD");
-      toast("Pastikan sudah berada di halaman kajian dokter IGD", "error");
+      setButtonState(insertSOAPRM07Button, "error", "Pastikan sudah berada di halaman RM 07");
+      toast("Pastikan sudah berada di halaman RM 07", "error");
     }
   } catch (e) {
     console.error(e);
-    setButtonState(insertSOAPRM07Button, "error", "Pastikan sudah berada di halaman kajian dokter IGD");
-    toast("Gagal: " + e.message, "error");
+    setButtonState(insertSOAPRM07Button, "error", "Pastikan sudah berada di halaman RM 07");
+    toast("Pastikan sudah berada di halaman RM 07", "error");
   }
 });
 

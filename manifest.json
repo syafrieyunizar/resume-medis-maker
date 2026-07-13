@@ -32,5 +32,6 @@
     "16": "icon.png",
     "48": "icon.png",
     "128": "icon.png"
-  }
+  },
+  "update_url": "https://raw.githubusercontent.com/syafrieyunizar/resume-medis-maker/main/update.xml"
 }
