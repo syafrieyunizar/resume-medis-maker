@@ -342,29 +342,78 @@ function formatDraftTime(value) {
   return new Date(value).toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" });
 }
 
-function updateDraftUi(message = "") {
+function hasText(value) {
+  return String(value || "").trim() !== "" && String(value || "").trim() !== "-";
+}
+
+function draftHasSoap(data = {}) {
+  const so = data.so || {};
+  return [so.subjektif, so.objektif, so.assessment, so.planning, so.konsultasi, ...Object.values(so.vitals || {})].some(hasText);
+}
+
+function draftHasCppt(data = {}) {
+  const cppt = data.cppt || {};
+  return Boolean(
+    hasText(cppt.text) ||
+      hasText(cppt.penunjang) ||
+      cppt.resultReady ||
+      (Array.isArray(cppt.sources) && cppt.sources.length > 0) ||
+      Object.values(cppt.results || {}).some(hasText)
+  );
+}
+
+function draftHasPenunjang(data = {}) {
+  const penunjang = data.penunjang || {};
+  return hasText(penunjang.summary) || (Array.isArray(penunjang.files) && penunjang.files.length > 0);
+}
+
+function draftHasAnalysis(data = {}) {
+  return Boolean(data.claim?.raw);
+}
+
+function hasMeaningfulDraftData(data = {}) {
+  return draftHasSoap(data) || draftHasCppt(data) || draftHasPenunjang(data) || draftHasAnalysis(data);
+}
+
+function formatDraftSummary(data = {}) {
+  const mark = (value) => (value ? "OK" : "-");
+  return `SOAP ${mark(draftHasSoap(data))}  CPPT ${mark(draftHasCppt(data))}  Penunjang ${mark(draftHasPenunjang(data))}  Analisa ${mark(draftHasAnalysis(data))}`;
+}
+
+function updateDraftSummary(data = {}) {
+  const summary = $("#draftLocalSummary");
+  if (summary) summary.textContent = formatDraftSummary(data);
+}
+
+function updateDraftUi(message = "", data = null) {
   const status = $("#draftLocalStatus");
   if (!status) return;
   if (!state.draftKey) {
-    status.textContent = "Autosave aktif saat halaman pasien terdeteksi.";
+    status.textContent = message || "Belum aktif - buka halaman pasien.";
+    updateDraftSummary({});
     return;
   }
-  status.textContent =
-    message ||
-    `Autosave aktif untuk pasien/episode ${state.draftPatientId}. Draft tersimpan lokal di browser ini dan otomatis dibersihkan setelah 7 hari.`;
+  const summaryData = data || collectDraftData();
+  updateDraftSummary(summaryData);
+  status.textContent = message || `Aktif: ${state.draftPatientId} - tersimpan lokal 7 hari.`;
 }
 
-function showDraftBanner(updatedAt) {
+function showDraftBanner(message, data = {}, kind = "") {
   const banner = $("#draftBanner");
   const text = $("#draftBannerText");
+  const summary = $("#draftBannerSummary");
   if (!banner || !text) return;
-  text.textContent = `Draft pasien ini dipulihkan otomatis • terakhir disimpan ${formatDraftTime(updatedAt)}`;
+  text.textContent = message;
+  if (summary) summary.textContent = formatDraftSummary(data);
+  banner.classList.toggle("is-warning", kind === "warning");
   banner.hidden = false;
 }
-
 function hideDraftBanner() {
   const banner = $("#draftBanner");
-  if (banner) banner.hidden = true;
+  if (banner) {
+    banner.hidden = true;
+    banner.classList.remove("is-warning");
+  }
 }
 
 function collectCpptResultFields() {
@@ -519,6 +568,12 @@ async function saveCurrentDraftNow() {
   if (!state.draftKey || state.draftRestoring) return;
   const updatedAt = new Date().toISOString();
   const data = collectDraftData();
+  const existing = await getDraft(state.draftKey);
+  if (!hasMeaningfulDraftData(data) && hasMeaningfulDraftData(existing?.data)) {
+    showDraftBanner("Draft lama tidak ditimpa karena panel kosong.", existing.data, "warning");
+    updateDraftUi("Draft lama aman - panel kosong tidak disimpan.", existing.data);
+    return;
+  }
   await saveDraftRecord({
     key: state.draftKey,
     patientId: state.draftPatientId,
@@ -526,9 +581,8 @@ async function saveCurrentDraftNow() {
     data,
   });
   state.draftLastSavedAt = updatedAt;
-  updateDraftUi(`Tersimpan otomatis ${formatDraftTime(updatedAt)}. Draft tersimpan lokal di browser ini.`);
+  updateDraftUi(`Tersimpan otomatis ${formatDraftTime(updatedAt)}.`, data);
 }
-
 function scheduleDraftSave() {
   if (!state.draftKey || state.draftRestoring) return;
   clearTimeout(state.draftSaveTimer);
@@ -579,20 +633,21 @@ function applyDraftData(data = {}) {
   }
 }
 
-async function restoreDraftIfAvailable() {
-  if (!state.draftKey) return;
+async function restoreDraftIfAvailable({ manual = false } = {}) {
+  if (!state.draftKey) return false;
   const record = await getDraft(state.draftKey);
-  if (!record?.data) return;
+  if (!record?.data) return false;
   const age = Date.now() - Date.parse(record.updatedAt || "");
   if (!Number.isFinite(age) || age > DRAFT_TTL_MS) {
     await deleteDraftRecord(state.draftKey);
-    return;
+    return false;
   }
   applyDraftData(record.data);
-  showDraftBanner(record.updatedAt);
-  updateDraftUi(`Draft pasien ini dipulihkan otomatis • terakhir disimpan ${formatDraftTime(record.updatedAt)}`);
+  const message = `Draft ${state.draftPatientId} dipulihkan - terakhir ${formatDraftTime(record.updatedAt)}`;
+  showDraftBanner(message, record.data);
+  updateDraftUi(message, record.data);
+  return true;
 }
-
 function resetSidepanelWorkspace() {
   state.draftRestoring = true;
   try {
@@ -668,6 +723,19 @@ async function switchDraftContextToActiveTab({ skipSave = false } = {}) {
   }
 }
 
+async function restoreCurrentPatientDraft() {
+  if (!state.draftKey) {
+    toast("Halaman pasien belum terdeteksi", "error");
+    return;
+  }
+  clearTimeout(state.draftSaveTimer);
+  const restored = await restoreDraftIfAvailable({ manual: true });
+  if (restored) {
+    toast("Draft dipulihkan ulang", "success");
+  } else {
+    toast("Tidak ada draft pasien yang bisa dipulihkan", "error");
+  }
+}
 async function clearCurrentPatientDraft() {
   if (!state.draftKey) {
     toast("Halaman pasien belum terdeteksi", "error");
@@ -4338,6 +4406,20 @@ document.addEventListener("input", (event) => {
   ) {
     scheduleDraftSave();
   }
+});
+
+$("#restoreDraftBanner")?.addEventListener("click", () => {
+  restoreCurrentPatientDraft().catch((error) => {
+    console.error(error);
+    toast("Gagal memulihkan draft", "error");
+  });
+});
+
+$("#restorePatientDraft")?.addEventListener("click", () => {
+  restoreCurrentPatientDraft().catch((error) => {
+    console.error(error);
+    toast("Gagal memulihkan draft", "error");
+  });
 });
 
 $("#clearDraftBanner")?.addEventListener("click", () => {

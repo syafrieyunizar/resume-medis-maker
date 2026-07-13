@@ -22,7 +22,11 @@
     <main class="content">
       <div id="draftBanner" class="draft-banner" hidden>
         <span id="draftBannerText">Draft pasien ini dipulihkan otomatis.</span>
-        <button id="clearDraftBanner" class="btn btn-outline btn-small" type="button">Hapus Draft</button>
+        <span id="draftBannerSummary" class="draft-summary-line">SOAP - CPPT - Penunjang - Analisa -</span>
+        <div class="draft-actions">
+          <button id="restoreDraftBanner" class="btn btn-outline btn-small" type="button">Pulihkan Ulang</button>
+          <button id="clearDraftBanner" class="btn btn-outline btn-small" type="button">Hapus Draft</button>
+        </div>
       </div>
       <!-- SETTING -->
       <section class="panel" data-panel="setting" hidden>
@@ -33,8 +37,12 @@
         </div>
         <div class="draft-local-box">
           <span class="label">Draft Lokal</span>
-          <div id="draftLocalStatus" class="draft-local-status">Autosave aktif saat halaman pasien terdeteksi.</div>
-          <button id="clearPatientDraft" class="btn btn-outline" type="button">Hapus Draft Pasien Ini</button>
+          <div id="draftLocalStatus" class="draft-local-status">Belum aktif - buka halaman pasien.</div>
+          <div id="draftLocalSummary" class="draft-summary-line">SOAP - CPPT - Penunjang - Analisa -</div>
+          <div class="draft-actions">
+            <button id="restorePatientDraft" class="btn btn-outline btn-small" type="button">Pulihkan Ulang</button>
+            <button id="clearPatientDraft" class="btn btn-outline btn-small" type="button">Hapus Draft</button>
+          </div>
         </div>
         <label class="field">
           <span class="label">Sumber API Key</span>

@@ -113,18 +113,23 @@ body.is-admin-mode .settings-button {
 
 .draft-banner {
   align-items: flex-start;
-  background: #dcfce7;
-  border: 1px solid rgba(22, 163, 74, 0.35);
+  background: #f7f7f7;
+  border: 1px solid var(--cloud-gray);
   border-radius: 9px;
-  color: var(--success);
+  color: var(--slate-gray);
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 5px;
   font-size: 11px;
   font-weight: 400;
   line-height: 1.4;
   margin-bottom: 10px;
   padding: 7px 9px;
+}
+.draft-banner.is-warning {
+  background: #fffbeb;
+  border-color: #fde68a;
+  color: #92400e;
 }
 
 .panel { display: none; flex-direction: column; gap: 12px; }
@@ -189,6 +194,17 @@ body.is-admin-mode .settings-button {
   color: var(--subtle-gray);
   font-size: 12px;
   line-height: 1.45;
+}
+.draft-summary-line {
+  color: var(--ash-gray);
+  font-size: 11px;
+  line-height: 1.35;
+}
+.draft-actions {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
 }
 .settings-main.is-admin-source #personalApiSettings {
   display: none;
