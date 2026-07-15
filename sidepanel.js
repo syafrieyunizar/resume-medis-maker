@@ -15,6 +15,7 @@ const state = {
   draftPatientId: "",
   draftRestoring: false,
   draftSaveTimer: null,
+  draftSyncTimer: null,
   draftLastSavedAt: "",
   adminProviders: [],
   adminUserResetTarget: "",
@@ -569,9 +570,13 @@ async function saveCurrentDraftNow() {
   const updatedAt = new Date().toISOString();
   const data = collectDraftData();
   const existing = await getDraft(state.draftKey);
-  if (!hasMeaningfulDraftData(data) && hasMeaningfulDraftData(existing?.data)) {
-    showDraftBanner("Draft lama tidak ditimpa karena panel kosong.", existing.data, "warning");
-    updateDraftUi("Draft lama aman - panel kosong tidak disimpan.", existing.data);
+  if (!hasMeaningfulDraftData(data)) {
+    if (hasMeaningfulDraftData(existing?.data)) {
+      showDraftBanner("Draft lama tidak ditimpa karena panel kosong.", existing.data, "warning");
+      updateDraftUi("Draft lama aman - panel kosong tidak disimpan.", existing.data);
+    } else {
+      updateDraftUi("Panel kosong - belum ada draft yang disimpan.", data);
+    }
     return;
   }
   await saveDraftRecord({
@@ -584,10 +589,14 @@ async function saveCurrentDraftNow() {
   updateDraftUi(`Tersimpan otomatis ${formatDraftTime(updatedAt)}.`, data);
 }
 function scheduleDraftSave() {
-  if (!state.draftKey || state.draftRestoring) return;
+  if (state.draftRestoring) return;
   clearTimeout(state.draftSaveTimer);
-  state.draftSaveTimer = setTimeout(() => {
-    saveCurrentDraftNow().catch((error) => console.error("Gagal autosave draft", error));
+  state.draftSaveTimer = setTimeout(async () => {
+    const switched = await switchDraftContextToActiveTab().catch((error) => {
+      console.error("Gagal sinkron context draft", error);
+      return false;
+    });
+    if (!switched) await saveCurrentDraftNow().catch((error) => console.error("Gagal autosave draft", error));
   }, 500);
 }
 
@@ -636,7 +645,10 @@ function applyDraftData(data = {}) {
 async function restoreDraftIfAvailable({ manual = false } = {}) {
   if (!state.draftKey) return false;
   const record = await getDraft(state.draftKey);
-  if (!record?.data) return false;
+  if (!record?.data || !hasMeaningfulDraftData(record.data)) {
+    if (record?.data) await deleteDraftRecord(state.draftKey);
+    return false;
+  }
   const age = Date.now() - Date.parse(record.updatedAt || "");
   if (!Number.isFinite(age) || age > DRAFT_TTL_MS) {
     await deleteDraftRecord(state.draftKey);
@@ -696,14 +708,14 @@ function resetSidepanelWorkspace() {
 let draftContextSwitching = false;
 
 async function switchDraftContextToActiveTab({ skipSave = false } = {}) {
-  if (draftContextSwitching) return;
+  if (draftContextSwitching) return false;
   const url = await getActiveTabUrl();
   const patientId = extractPatientDraftId(url);
   const nextKey = patientId ? `patient:${patientId}` : "";
   if (nextKey === state.draftKey) {
     state.draftPatientId = patientId;
     if (!state.draftKey) updateDraftUi();
-    return;
+    return false;
   }
 
   draftContextSwitching = true;
@@ -718,15 +730,17 @@ async function switchDraftContextToActiveTab({ skipSave = false } = {}) {
     resetSidepanelWorkspace();
     updateDraftUi();
     if (nextKey) await restoreDraftIfAvailable();
+    return true;
   } finally {
     draftContextSwitching = false;
   }
 }
 
 async function restoreCurrentPatientDraft() {
+  await switchDraftContextToActiveTab({ skipSave: true });
   if (!state.draftKey) {
     toast("Halaman pasien belum terdeteksi", "error");
-    return;
+    return false;
   }
   clearTimeout(state.draftSaveTimer);
   const restored = await restoreDraftIfAvailable({ manual: true });
@@ -735,6 +749,7 @@ async function restoreCurrentPatientDraft() {
   } else {
     toast("Tidak ada draft pasien yang bisa dipulihkan", "error");
   }
+  return restored;
 }
 async function clearCurrentPatientDraft() {
   if (!state.draftKey) {
@@ -763,6 +778,9 @@ async function clearCurrentPatientDraft() {
 async function initDraftSystem() {
   await cleanupExpiredDrafts();
   await switchDraftContextToActiveTab({ skipSave: true });
+  state.draftSyncTimer = setInterval(() => {
+    switchDraftContextToActiveTab().catch((error) => console.error("Gagal sinkron context draft", error));
+  }, 1500);
 }
 
 function updatePenunjangList() {
@@ -1281,8 +1299,22 @@ function parseJsonResponse(text) {
   try {
     return JSON.parse(cleaned);
   } catch (error) {
+    const position = Number(String(error?.message || "").match(/position (\d+)/)?.[1]);
+    if (position > 0) {
+      try {
+        return JSON.parse(cleaned.slice(0, position));
+      } catch (_) {
+        // lanjut ke ekstraksi object pertama
+      }
+    }
     const firstObject = findFirstJsonObject(cleaned);
-    if (firstObject) return JSON.parse(firstObject);
+    if (firstObject) {
+      try {
+        return JSON.parse(firstObject);
+      } catch (_) {
+        // gunakan pesan error asli agar posisi masalah tetap terlihat
+      }
+    }
     throw error;
   }
 }
@@ -1616,6 +1648,30 @@ function getAdminAccessHelpText(message) {
   return message;
 }
 
+let adminAccessStatusTimer = null;
+let settingsStatusTimer = null;
+
+function showTimedStatus(element, className, message, duration = 10000) {
+  if (!element) return;
+  element.hidden = false;
+  element.className = className;
+  element.textContent = message;
+  const isAdminAccess = element.id === "adminUserAccessStatus";
+  clearTimeout(isAdminAccess ? adminAccessStatusTimer : settingsStatusTimer);
+  const timer = setTimeout(() => {
+    element.hidden = true;
+    element.textContent = "";
+  }, duration);
+  if (isAdminAccess) adminAccessStatusTimer = timer;
+  else settingsStatusTimer = timer;
+}
+
+function updateSettingsSaveButton(session = null) {
+  const saveButton = $("#saveSettings");
+  const useAdmin = $("#apiKeySource")?.value === "admin";
+  if (saveButton) saveButton.hidden = useAdmin && !session?.username;
+}
+
 function renderAdminAccessSession(session) {
   const info = $("#adminUserSessionInfo");
   const loginForm = $("#adminUserLoginForm");
@@ -1624,6 +1680,7 @@ function renderAdminAccessSession(session) {
   const usernameInput = $("#adminAccessUsername");
   const passwordInput = $("#adminAccessPassword");
   if (!info || !loginForm || !loginButton || !logoutButton) return;
+  updateSettingsSaveButton(session);
   if (session?.username) {
     info.hidden = false;
     info.className = "status is-success";
@@ -2718,6 +2775,7 @@ function syncApiKeySourceFields() {
   const adminAccessPanel = $("#adminUserAccessPanel");
   if (personalGroup) personalGroup.hidden = useAdmin;
   if (adminAccessPanel) adminAccessPanel.hidden = !useAdmin;
+  updateSettingsSaveButton();
   ["provider", "apiKey", "model", "customProviderLabel", "customBaseUrl", "geminiFallbackApiKey", "geminiFallbackModel"].forEach((id) => {
     const el = $("#" + id);
     if (el) el.disabled = useAdmin;
@@ -2854,16 +2912,14 @@ $("#saveSettings").addEventListener("click", async () => {
     status.textContent = "Memeriksa akses API key admin...";
     const session = await validateStoredAdminUserSession();
     if (!session) {
-      status.className = "status is-error";
-      status.textContent =
-        "Login akses admin terlebih dahulu untuk memakai API key admin. Silakan isi username dan password, lalu tekan Login Akses Admin. Jika belum memiliki username dan password, Silakan hubungi dr. Yunizar";
+      showTimedStatus(status, "status is-error", "Login akses admin terlebih dahulu untuk memakai API key admin.");
       toast("Login akses admin diperlukan", "error");
       await refreshAdminAccessUi();
       return;
     }
     await chrome.storage.local.set({ apiKeySource: "admin" });
-    status.className = "status is-success";
-    status.textContent = "API key admin siap digunakan.";
+    setButtonState($("#saveSettings"), "success", "\u2713 Tersimpan", { duration: 2500 });
+    showTimedStatus(status, "status is-success", "API key admin siap digunakan.", 3000);
     toast("API key admin siap digunakan", "success");
     await renderActiveApiKeyStatus();
     return;
@@ -3007,9 +3063,8 @@ $("#loginAdminAccess").addEventListener("click", async () => {
   const username = $("#adminAccessUsername").value.trim();
   const password = $("#adminAccessPassword").value;
   if (!username || !password) {
-    status.hidden = false;
-    status.className = "status is-error";
-    status.textContent = "Username dan password wajib diisi.";
+    updateSettingsSaveButton();
+    showTimedStatus(status, "status is-error", "Username dan password wajib diisi.");
     return;
   }
   status.hidden = false;
@@ -3029,15 +3084,12 @@ $("#loginAdminAccess").addEventListener("click", async () => {
       expiresAt: data.session?.expiresAt || null,
     });
     $("#adminAccessPassword").value = "";
-    status.hidden = false;
-    status.className = "status is-success";
-    status.textContent = "Akses API key admin aktif.";
+    showTimedStatus(status, "status is-success", "Akses API key admin aktif.", 3000);
     await refreshAdminAccessUi();
     await renderActiveApiKeyStatus();
   } catch (e) {
-    status.hidden = false;
-    status.className = "status is-error";
-    status.textContent = getAdminAccessHelpText(String(e.message || e));
+    updateSettingsSaveButton();
+    showTimedStatus(status, "status is-error", getAdminAccessHelpText(String(e.message || e)));
   }
 });
 
@@ -4408,19 +4460,21 @@ document.addEventListener("input", (event) => {
   }
 });
 
-$("#restoreDraftBanner")?.addEventListener("click", () => {
-  restoreCurrentPatientDraft().catch((error) => {
+async function handleRestoreDraftClick(event) {
+  const button = event.currentTarget;
+  setButtonState(button, "primary", "Memulihkan...");
+  try {
+    const restored = await restoreCurrentPatientDraft();
+    setButtonState(button, restored ? "success" : "error", restored ? "Dipulihkan" : "Tidak ada draft");
+  } catch (error) {
     console.error(error);
+    setButtonState(button, "error", "Gagal memulihkan");
     toast("Gagal memulihkan draft", "error");
-  });
-});
+  }
+}
 
-$("#restorePatientDraft")?.addEventListener("click", () => {
-  restoreCurrentPatientDraft().catch((error) => {
-    console.error(error);
-    toast("Gagal memulihkan draft", "error");
-  });
-});
+$("#restoreDraftBanner")?.addEventListener("click", handleRestoreDraftClick);
+$("#restorePatientDraft")?.addEventListener("click", handleRestoreDraftClick);
 
 $("#clearDraftBanner")?.addEventListener("click", () => {
   clearCurrentPatientDraft().catch((error) => {

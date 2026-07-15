@@ -1,12 +1,12 @@
 {
   "manifest_version": 3,
-  "name": "Resume Medis Reviewer",
+  "name": "Resume Medis Helper RSBHHB",
   "version": "1.0.0",
-  "description": "Side panel untuk membantu review SO dan CPPT pasien dengan bantuan Gemini AI.",
+  "description": "Side panel untuk membantu user membuat/mereview resume medis dengan menggunakan AI",
   "permissions": ["sidePanel", "storage", "activeTab", "scripting"],
   "host_permissions": ["<all_urls>"],
   "action": {
-    "default_title": "Resume Medis Reviewer"
+    "default_title": "Resume Medis Helper RSBHHB"
   },
   "background": {
     "service_worker": "background.js"
@@ -32,6 +32,5 @@
     "16": "icon.png",
     "48": "icon.png",
     "128": "icon.png"
-  },
-  "update_url": "https://raw.githubusercontent.com/syafrieyunizar/resume-medis-maker/main/update.xml"
+  }
 }

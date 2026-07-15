@@ -60,6 +60,54 @@ function json(body: unknown, status = 200) {
   });
 }
 
+function parseFirstJsonValue(text: string) {
+  const source = String(text || "").trim();
+  try {
+    return JSON.parse(source);
+  } catch (originalError) {
+    for (let start = 0; start < source.length; start += 1) {
+      if (source[start] !== "{" && source[start] !== "[") continue;
+      const end = findFirstJsonValueEnd(source, start);
+      if (end < 0) continue;
+      try {
+        return JSON.parse(source.slice(start, end));
+      } catch (_) {
+        // Continue to the next possible JSON value.
+      }
+    }
+    throw originalError;
+  }
+}
+
+function findFirstJsonValueEnd(text: string, start: number) {
+  const stack: string[] = [];
+  let inString = false;
+  let escaped = false;
+  for (let i = start; i < text.length; i += 1) {
+    const char = text[i];
+    if (escaped) {
+      escaped = false;
+      continue;
+    }
+    if (inString && char === "\\") {
+      escaped = true;
+      continue;
+    }
+    if (char === "\"") {
+      inString = !inString;
+      continue;
+    }
+    if (inString) continue;
+    if (char === "{") stack.push("}");
+    else if (char === "[") stack.push("]");
+    else if (char === "}" || char === "]") {
+      if (stack.pop() !== char) return -1;
+      if (!stack.length) return i + 1;
+    }
+  }
+  return -1;
+}
+
 function normalizeList(value: unknown): string[] {
   if (Array.isArray(value)) {
     return value.map((item) => String(item).trim()).filter(Boolean);
@@ -176,6 +224,9 @@ function sanitizeAiConfig(config: Record<string, unknown>, appId: string, existi
   const providerLabel = String(config.provider_label || config.providerLabel || "").trim();
   const baseUrl = String(config.base_url || config.baseUrl || "").trim();
   const apiKey = String(config.api_key || config.apiKey || "").trim() || existing?.api_key || "";
+  const fallbackApiKey = String(config.gemini_fallback_api_key || config.geminiFallbackApiKey || "").trim()
+    || existing?.gemini_fallback_api_key
+    || null;
   const model = String(config.model || existing?.model || "").trim();
   if (provider !== "gemini") {
     const endpoint = baseUrl || existing?.base_url || OPENAI_ENDPOINTS[provider] || "";
@@ -185,13 +236,14 @@ function sanitizeAiConfig(config: Record<string, unknown>, appId: string, existi
   if (!apiKey) throw new Error("API key admin wajib diisi");
   if (!model) throw new Error("Model admin wajib diisi");
   return {
+    id: appId,
     app_id: appId,
     provider,
     provider_label: providerLabel || PROVIDER_LABELS[provider] || provider,
     base_url: provider === "gemini" ? null : (baseUrl || existing?.base_url || OPENAI_ENDPOINTS[provider] || null),
     api_key: apiKey,
     model,
-    gemini_fallback_api_key: String(config.gemini_fallback_api_key || config.geminiFallbackApiKey || "").trim() || null,
+    gemini_fallback_api_key: fallbackApiKey,
     gemini_fallback_model: String(config.gemini_fallback_model || config.geminiFallbackModel || "gemini-2.0-flash").trim(),
     updated_at: new Date().toISOString(),
   };
@@ -395,36 +447,6 @@ async function logoutAdminAiUser(payload: Record<string, unknown>) {
   });
 }
 
-async function saveAdminAiProvider(config: AdminAiConfig) {
-  await supabaseRequest(`admin_ai_providers?app_id=eq.${encodeURIComponent(config.app_id || config.id || "")}`, {
-    method: "PATCH",
-    body: JSON.stringify({ active: false, updated_at: new Date().toISOString() }),
-  });
-  const providerPayload = {
-    app_id: config.app_id || config.id || "",
-    provider: config.provider,
-    provider_label: config.provider_label || null,
-    base_url: config.base_url || null,
-    api_key: config.api_key,
-    model: config.model,
-    active: true,
-    gemini_fallback_api_key: config.gemini_fallback_api_key || null,
-    gemini_fallback_model: config.gemini_fallback_model || "gemini-2.0-flash",
-    updated_at: new Date().toISOString(),
-  };
-  const data = await supabaseRequest("admin_ai_providers?on_conflict=app_id,provider", {
-    method: "POST",
-    headers: { Prefer: "resolution=merge-duplicates,return=representation" },
-    body: JSON.stringify(providerPayload),
-  });
-  await supabaseRequest("admin_ai_config?on_conflict=app_id", {
-    method: "POST",
-    headers: { Prefer: "resolution=merge-duplicates,return=representation" },
-    body: JSON.stringify(config),
-  });
-  return data?.[0] || providerPayload;
-}
-
 async function resetAdminAiProvider(appId: string, provider: string) {
   const existing = await getAdminAiProvider(appId, provider);
   if (!existing) throw new Error("Provider admin belum tersimpan");
@@ -442,6 +464,7 @@ async function resetAdminAiProvider(appId: string, provider: string) {
   );
   const providerConfig = providerRows?.[0] || { ...existing, ...patch };
   const mirrorConfig = {
+    id: appId,
     app_id: appId,
     provider: existing.provider,
     provider_label: existing.provider_label || null,
@@ -462,6 +485,25 @@ async function resetAdminAiProvider(appId: string, provider: string) {
     config: publicAiConfig(providerConfig),
     providers: providers.map(publicProvider),
   };
+}
+
+async function saveAdminAiProvider(config: AdminAiConfig) {
+  await supabaseRequest(`admin_ai_providers?app_id=eq.${encodeURIComponent(config.app_id || config.id || "")}`, {
+    method: "PATCH",
+    body: JSON.stringify({ active: false, updated_at: new Date().toISOString() }),
+  });
+  const providerPayload = { ...config, active: true };
+  const data = await supabaseRequest("admin_ai_providers?on_conflict=app_id,provider", {
+    method: "POST",
+    headers: { Prefer: "resolution=merge-duplicates,return=representation" },
+    body: JSON.stringify(providerPayload),
+  });
+  await supabaseRequest("admin_ai_config?on_conflict=app_id", {
+    method: "POST",
+    headers: { Prefer: "resolution=merge-duplicates,return=representation" },
+    body: JSON.stringify(config),
+  });
+  return data?.[0] || providerPayload;
 }
 
 async function callGemini(config: AdminAiConfig, payload: Record<string, unknown>) {
@@ -490,7 +532,7 @@ async function callGemini(config: AdminAiConfig, payload: Record<string, unknown
   );
   const text = await res.text();
   if (!res.ok) throw new Error(`Gemini API ${res.status}: ${text.slice(0, 200)}`);
-  const data = JSON.parse(text);
+  const data = parseFirstJsonValue(text);
   return data?.candidates?.[0]?.content?.parts?.[0]?.text || "";
 }
 
@@ -515,7 +557,7 @@ async function callOpenAiCompatible(config: AdminAiConfig, payload: Record<strin
   });
   const text = await res.text();
   if (!res.ok) throw new Error(`Provider API ${res.status}: ${text.slice(0, 200)}`);
-  const data = JSON.parse(text);
+  const data = parseFirstJsonValue(text);
   return data?.choices?.[0]?.message?.content || "";
 }
 
@@ -524,9 +566,23 @@ async function callAdminAi(payload: Record<string, unknown>) {
   const appId = getAppId(payload);
   const config = await getAdminAiConfig(appId);
   if (!config?.api_key) throw new Error("API key admin belum diset");
-  const text = config.provider === "gemini"
-    ? await callGemini(config, payload)
-    : await callOpenAiCompatible(config, payload);
+  let text = "";
+  try {
+    text = config.provider === "gemini"
+      ? await callGemini(config, payload)
+      : await callOpenAiCompatible(config, payload);
+  } catch (error) {
+    if (config.provider === "gemini" || !config.gemini_fallback_api_key) throw error;
+    text = await callGemini(
+      {
+        ...config,
+        provider: "gemini",
+        api_key: config.gemini_fallback_api_key,
+        model: config.gemini_fallback_model || "gemini-2.0-flash",
+      },
+      payload,
+    );
+  }
   if (!String(text || "").trim()) throw new Error("Respons AI admin kosong");
   return text;
 }
@@ -550,6 +606,14 @@ Deno.serve(async (req) => {
         method: "GET",
         headers: { Prefer: "" },
       });
+      return json({ chunks: data || [] });
+    }
+
+    if (action === "list_active") {
+      const data = await supabaseRequest(
+        "knowledge_chunks?select=id,title,content,category,keywords,diagnosis_tags&active=eq.true&order=updated_at.desc&limit=200",
+        { method: "GET", headers: { Prefer: "" } },
+      );
       return json({ chunks: data || [] });
     }
 
@@ -620,6 +684,17 @@ Deno.serve(async (req) => {
       const text = config.provider === "gemini"
         ? await callGemini(config, { prompt: "Balas OK.", temperature: 0 })
         : await callOpenAiCompatible(config, { prompt: "Balas OK.", temperature: 0 });
+      if (config.provider !== "gemini" && config.gemini_fallback_api_key) {
+        await callGemini(
+          {
+            ...config,
+            provider: "gemini",
+            api_key: config.gemini_fallback_api_key,
+            model: config.gemini_fallback_model || "gemini-2.0-flash",
+          },
+          { prompt: "Balas OK.", temperature: 0 },
+        );
+      }
       return json({ ok: true, preview: String(text || "").slice(0, 40) });
     }
 
@@ -683,3 +758,4 @@ Deno.serve(async (req) => {
     return json({ error: message }, 400);
   }
 });
+

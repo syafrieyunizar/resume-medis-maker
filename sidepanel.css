@@ -48,6 +48,21 @@ html, body {
   align-items: flex-start;
   justify-content: space-between;
   gap: 10px;
+  margin-bottom: 12px;
+}
+
+.app-brand {
+  align-items: center;
+  display: flex;
+  gap: 9px;
+  min-width: 0;
+}
+
+.app-logo {
+  flex: 0 0 auto;
+  height: 32px;
+  width: 32px;
+  object-fit: contain;
 }
 
 .app-title {
@@ -55,7 +70,7 @@ html, body {
   font-weight: 700;
   font-size: 20px;
   letter-spacing: -0.04em;
-  margin: 0 0 12px;
+  margin: 0;
   color: var(--ink-solid);
 }
 
