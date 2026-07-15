@@ -686,6 +686,124 @@ body.is-admin-mode .settings-button {
   width: 100%;
 }
 
+.pull-period-modal {
+  padding: 10px;
+}
+.pull-period-dialog {
+  max-width: 520px;
+}
+
+.pull-period-actions {
+  margin-top: 18px;
+}
+
+.date-range-picker {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.date-range-picker[hidden] { display: none; }
+.date-range-heading {
+  align-items: center;
+  display: grid;
+  gap: 8px;
+  grid-template-columns: 30px 1fr 30px;
+  text-align: center;
+}
+.date-range-heading .section-title { grid-column: 2; }
+.date-range-nav {
+  align-items: center;
+  appearance: none;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  color: var(--ink-solid);
+  cursor: pointer;
+  display: inline-flex;
+  font-size: 22px;
+  height: 30px;
+  justify-content: center;
+  padding: 0;
+  width: 30px;
+}
+.date-range-nav:hover { border-color: var(--cloud-gray); }
+.date-range-months {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+.date-range-month { min-width: 0; }
+.date-range-month-heading {
+  align-items: center;
+  display: grid;
+  font-size: 12px;
+  grid-template-columns: 30px 1fr 30px;
+  min-height: 32px;
+  text-align: center;
+}
+.date-range-month-heading > strong {
+  grid-column: 2;
+  grid-row: 1;
+}
+#dateRangePrevious { grid-column: 1; }
+#dateRangeNext { grid-column: 3; }
+.date-range-month-heading .date-range-nav { grid-row: 1; }
+.date-range-grid {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  row-gap: 4px;
+}
+.date-range-weekday,
+.date-range-empty,
+.date-range-day {
+  align-items: center;
+  display: flex;
+  font-size: 11px;
+  height: 26px;
+  justify-content: center;
+  min-width: 0;
+}
+.date-range-weekday {
+  color: var(--subtle-gray);
+  font-size: 9px;
+  font-weight: 700;
+}
+.date-range-day {
+  appearance: none;
+  background: transparent;
+  border: 0;
+  color: var(--ink-solid);
+  cursor: pointer;
+  padding: 0;
+}
+.date-range-day:hover span { outline: 1px solid var(--ink-solid); }
+.date-range-day.is-in-range { background: var(--whisper-white); }
+.date-range-day span {
+  align-items: center;
+  aspect-ratio: 1;
+  border-radius: 50%;
+  display: inline-flex;
+  justify-content: center;
+  max-width: 22px;
+  width: 100%;
+}
+.date-range-day.is-today span { outline: 1px solid var(--ash-gray); }
+.date-range-day.is-endpoint span {
+  background: var(--ink-solid);
+  color: var(--canvas-white);
+  outline: none;
+}
+.date-range-summary {
+  background: var(--whisper-white);
+  border-radius: 8px;
+  display: flex;
+  font-size: 11px;
+  gap: 12px;
+  justify-content: space-between;
+  padding: 8px 10px;
+}
+.date-range-summary span { min-width: 0; }
+.date-range-summary strong { color: var(--ink-solid); }
 .modal-message {
   color: var(--subtle-gray);
   font-size: 14px;

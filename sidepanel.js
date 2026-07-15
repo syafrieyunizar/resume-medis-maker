@@ -905,10 +905,8 @@ function summarizePulledKinds(files) {
     .join(", ");
 }
 
-function isWithinCarePeriod(resultDate) {
+function isWithinDateRange(resultDate, start, end) {
   const date = parseFlexibleDate(resultDate);
-  const start = state.cpptSummary?.startDate;
-  const end = state.cpptSummary?.endDate;
   if (!date || !start || !end) return false;
   const day = new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime();
   const startDay = new Date(start.getFullYear(), start.getMonth(), start.getDate()).getTime();
@@ -916,6 +914,9 @@ function isWithinCarePeriod(resultDate) {
   return day >= startDay && day <= endDay;
 }
 
+function isWithinCarePeriod(resultDate) {
+  return isWithinDateRange(resultDate, state.cpptSummary?.startDate, state.cpptSummary?.endDate);
+}
 function isPdfArrayBuffer(buffer) {
   const head = String.fromCharCode(...new Uint8Array(buffer).slice(0, 4));
   return head === "%PDF";
@@ -3982,28 +3983,142 @@ const pullPenunjangBtn = $("#pullPenunjang");
 const summarizePenunjangBtn = $("#summarizePenunjang");
 const pullPeriodConfirm = $("#pullPeriodConfirm");
 const pullPeriodYes = $("#pullPeriodYes");
+const pullPeriodManual = $("#pullPeriodManual");
 const pullPeriodNo = $("#pullPeriodNo");
+const pullPeriodChoices = $("#pullPeriodChoices");
+const pullPeriodCalendar = $("#pullPeriodCalendar");
+const pullPeriodApply = $("#pullPeriodApply");
 const MIN_PENUNJANG_FILE_SIZE = 10 * 1024;
+const DATE_RANGE_WEEKDAYS = ["Sn", "Sl", "Rb", "Km", "Jm", "Sb", "Mg"];
+let dateRangeViewMonth = null;
+let dateRangeStart = null;
+let dateRangeEnd = null;
 
 function setPullConfirmVisible(visible) {
   if (pullPeriodConfirm) pullPeriodConfirm.hidden = !visible;
 }
 
+function sameCalendarDay(a, b) {
+  return Boolean(a && b) &&
+    a.getFullYear() === b.getFullYear() &&
+    a.getMonth() === b.getMonth() &&
+    a.getDate() === b.getDate();
+}
+
+function renderDateRangeMonth(month, title, grid) {
+  title.textContent = month.toLocaleDateString("id-ID", { month: "long", year: "numeric" });
+  grid.replaceChildren();
+  DATE_RANGE_WEEKDAYS.forEach((label) => {
+    const weekday = document.createElement("span");
+    weekday.className = "date-range-weekday";
+    weekday.textContent = label;
+    grid.append(weekday);
+  });
+
+  const firstDayOffset = (new Date(month.getFullYear(), month.getMonth(), 1).getDay() + 6) % 7;
+  for (let i = 0; i < firstDayOffset; i += 1) {
+    const empty = document.createElement("span");
+    empty.className = "date-range-empty";
+    grid.append(empty);
+  }
+
+  const daysInMonth = new Date(month.getFullYear(), month.getMonth() + 1, 0).getDate();
+  const today = new Date();
+  for (let day = 1; day <= daysInMonth; day += 1) {
+    const date = new Date(month.getFullYear(), month.getMonth(), day);
+    const button = document.createElement("button");
+    const dateValue = date.getTime();
+    button.type = "button";
+    button.className = "date-range-day";
+    button.dataset.date = String(dateValue);
+    button.setAttribute("aria-label", formatDateId(date));
+    if (sameCalendarDay(date, today)) button.classList.add("is-today");
+    if (dateRangeStart && dateRangeEnd && dateValue >= dateRangeStart.getTime() && dateValue <= dateRangeEnd.getTime()) {
+      button.classList.add("is-in-range");
+    }
+    if (sameCalendarDay(date, dateRangeStart) || sameCalendarDay(date, dateRangeEnd)) {
+      button.classList.add("is-endpoint");
+    }
+    const number = document.createElement("span");
+    number.textContent = String(day);
+    button.append(number);
+    grid.append(button);
+  }
+}
+
+function renderDateRangePicker() {
+  const secondMonth = new Date(dateRangeViewMonth.getFullYear(), dateRangeViewMonth.getMonth() + 1, 1);
+  renderDateRangeMonth(dateRangeViewMonth, $("#dateRangeMonthFirst"), $("#dateRangeGridFirst"));
+  renderDateRangeMonth(secondMonth, $("#dateRangeMonthSecond"), $("#dateRangeGridSecond"));
+  $("#dateRangeStart").textContent = dateRangeStart ? formatDateId(dateRangeStart) : "-";
+  $("#dateRangeEnd").textContent = dateRangeEnd ? formatDateId(dateRangeEnd) : "-";
+  pullPeriodApply.disabled = !(dateRangeStart && dateRangeEnd);
+}
+
+function showManualDateRange() {
+  const initialDate = state.cpptSummary?.startDate || new Date();
+  dateRangeViewMonth = new Date(initialDate.getFullYear(), initialDate.getMonth(), 1);
+  dateRangeStart = null;
+  dateRangeEnd = null;
+  pullPeriodChoices.hidden = true;
+  pullPeriodCalendar.hidden = false;
+  renderDateRangePicker();
+}
+
+function selectDateRangeDay(date) {
+  if (!dateRangeStart || dateRangeEnd) {
+    dateRangeStart = date;
+    dateRangeEnd = null;
+  } else if (date.getTime() < dateRangeStart.getTime()) {
+    dateRangeEnd = dateRangeStart;
+    dateRangeStart = date;
+  } else {
+    dateRangeEnd = date;
+  }
+  renderDateRangePicker();
+}
+
 pullPenunjangBtn.addEventListener("click", () => {
+  pullPeriodChoices.hidden = false;
+  pullPeriodCalendar.hidden = true;
   setPullConfirmVisible(true);
 });
 
 pullPeriodYes.addEventListener("click", () => pullPenunjangData({ filterByPeriod: true }));
+pullPeriodManual.addEventListener("click", showManualDateRange);
 pullPeriodNo.addEventListener("click", () => pullPenunjangData({ filterByPeriod: false }));
+$("#pullPeriodBack").addEventListener("click", () => {
+  pullPeriodCalendar.hidden = true;
+  pullPeriodChoices.hidden = false;
+});
+$("#dateRangePrevious").addEventListener("click", () => {
+  dateRangeViewMonth = new Date(dateRangeViewMonth.getFullYear(), dateRangeViewMonth.getMonth() - 2, 1);
+  renderDateRangePicker();
+});
+$("#dateRangeNext").addEventListener("click", () => {
+  dateRangeViewMonth = new Date(dateRangeViewMonth.getFullYear(), dateRangeViewMonth.getMonth() + 2, 1);
+  renderDateRangePicker();
+});
+pullPeriodCalendar.addEventListener("click", (event) => {
+  const day = event.target.closest(".date-range-day");
+  if (day) selectDateRangeDay(new Date(Number(day.dataset.date)));
+});
+pullPeriodApply.addEventListener("click", () => {
+  if (dateRangeStart && dateRangeEnd) {
+    pullPenunjangData({ filterByPeriod: false, dateRange: { start: dateRangeStart, end: dateRangeEnd } });
+  }
+});
 
-async function pullPenunjangData({ filterByPeriod }) {
+async function pullPenunjangData({ filterByPeriod, dateRange = null }) {
   setPullConfirmVisible(false);
   const status = $("#penunjangStatus");
   status.hidden = false;
   status.className = "status is-loading";
-  status.textContent = filterByPeriod
-    ? "Mencari data HASIL sesuai periode rawat inap..."
-    : "Mencari dan membuka seluruh data HASIL...";
+  status.textContent = dateRange
+    ? "Mencari data HASIL tanggal " + formatDateId(dateRange.start) + " - " + formatDateId(dateRange.end) + "..."
+    : filterByPeriod
+      ? "Mencari data HASIL sesuai periode rawat inap..."
+      : "Mencari dan membuka seluruh data HASIL...";
   pullPenunjangBtn.disabled = true;
 
   try {
@@ -4115,7 +4230,9 @@ async function pullPenunjangData({ filterByPeriod }) {
     });
 
     let candidateRows = (result?.rows || []).filter((row) => row.ok && row.url);
-    if (filterByPeriod) {
+    if (dateRange) {
+      candidateRows = candidateRows.filter((row) => isWithinDateRange(row.resultDate, dateRange.start, dateRange.end));
+    } else if (filterByPeriod) {
       candidateRows = candidateRows.filter((row) => isWithinCarePeriod(row.resultDate));
     }
     const okRows = [];
@@ -4179,9 +4296,11 @@ async function pullPenunjangData({ filterByPeriod }) {
       toast(`${smallRows.length} data penunjang diabaikan karena ukuran file kurang dari 10 KB`, "error");
     } else if (result?.total) {
       status.className = "status is-error";
-      status.textContent = filterByPeriod
-        ? "Tidak ada data HASIL dalam periode rawat inap."
-        : "Label HASIL ditemukan, tetapi PDF belum bisa diambil. Pastikan tombol HASIL berisi link PDF.";
+      status.textContent = dateRange
+        ? "Tidak ada data HASIL dalam rentang tanggal yang dipilih."
+        : filterByPeriod
+          ? "Tidak ada data HASIL dalam periode rawat inap."
+          : "Label HASIL ditemukan, tetapi PDF belum bisa diambil. Pastikan tombol HASIL berisi link PDF.";
       toast("PDF tidak berhasil ditarik", "error");
     } else {
       status.className = "status is-error";

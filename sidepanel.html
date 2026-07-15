@@ -409,16 +409,46 @@
           <textarea id="penunjangSummary" class="textarea textarea-long" rows="10" placeholder="Hasil rangkuman penunjang bermakna akan muncul di sini..."></textarea>
         </label>
 
-        <div id="pullPeriodConfirm" class="full-panel-modal" hidden role="dialog" aria-modal="true" aria-labelledby="pullPeriodConfirmTitle">
-          <div class="full-panel-dialog">
-            <h2 id="pullPeriodConfirmTitle" class="section-title">Tarik data sesuai periode rawat inap?</h2>
-            <div class="action-row">
-              <button id="pullPeriodYes" class="btn btn-primary" type="button">Ya, sesuai periode</button>
-              <button id="pullPeriodNo" class="btn btn-outline" type="button">Tidak, tarik semua</button>
+        <div id="pullPeriodConfirm" class="full-panel-modal pull-period-modal" hidden role="dialog" aria-modal="true" aria-labelledby="pullPeriodConfirmTitle">
+          <div class="full-panel-dialog pull-period-dialog">
+            <div id="pullPeriodChoices">
+              <h2 id="pullPeriodConfirmTitle" class="section-title">Tarik data sesuai periode rawat inap?</h2>
+              <div class="action-row pull-period-actions">
+                <button id="pullPeriodYes" class="btn btn-primary" type="button">Ya, sesuai periode</button>
+                <button id="pullPeriodManual" class="btn btn-outline" type="button">Saya atur tanggal sendiri</button>
+                <button id="pullPeriodNo" class="btn btn-outline" type="button">Tidak, tarik semua</button>
+              </div>
+            </div>
+
+            <div id="pullPeriodCalendar" class="date-range-picker" hidden>
+              <div class="date-range-heading">
+                <button id="pullPeriodBack" class="date-range-nav" type="button" title="Kembali" aria-label="Kembali">&#8592;</button>
+                <h2 class="section-title">Pilih rentang tanggal</h2>
+              </div>
+              <div class="date-range-months">
+                <section class="date-range-month">
+                  <div class="date-range-month-heading">
+                    <button id="dateRangePrevious" class="date-range-nav" type="button" title="Dua bulan sebelumnya" aria-label="Dua bulan sebelumnya">&#8249;</button>
+                    <strong id="dateRangeMonthFirst"></strong>
+                  </div>
+                  <div id="dateRangeGridFirst" class="date-range-grid"></div>
+                </section>
+                <section class="date-range-month">
+                  <div class="date-range-month-heading">
+                    <strong id="dateRangeMonthSecond"></strong>
+                    <button id="dateRangeNext" class="date-range-nav" type="button" title="Dua bulan berikutnya" aria-label="Dua bulan berikutnya">&#8250;</button>
+                  </div>
+                  <div id="dateRangeGridSecond" class="date-range-grid"></div>
+                </section>
+              </div>
+              <div class="date-range-summary" aria-live="polite">
+                <span>Awal <strong id="dateRangeStart">-</strong></span>
+                <span>Akhir <strong id="dateRangeEnd">-</strong></span>
+              </div>
+              <button id="pullPeriodApply" class="btn btn-primary" type="button" disabled>Tarik data</button>
             </div>
           </div>
         </div>
-
         <div class="action-row">
           <button id="pullPenunjang" class="btn btn-primary">Tarik Data</button>
         </div>
