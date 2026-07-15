@@ -68,9 +68,37 @@ html, body {
 .app-title {
   font-family: var(--font-heading);
   font-weight: 700;
-  font-size: 20px;
-  letter-spacing: -0.04em;
+  font-size: 16px;
+  letter-spacing: 0;
   margin: 0;
+  color: var(--ink-solid);
+}
+
+.header-actions {
+  align-items: center;
+  display: flex;
+  flex: 0 0 auto;
+  gap: 6px;
+}
+
+.support-button {
+  background: var(--ink-solid);
+  border: 1px solid var(--ink-solid);
+  border-radius: 9px;
+  color: var(--canvas-white);
+  cursor: pointer;
+  font-family: var(--font-body);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1;
+  padding: 7px 9px;
+  text-decoration: none;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+  white-space: nowrap;
+}
+.support-button:hover {
+  background: var(--canvas-white);
+  border-color: var(--ink-solid);
   color: var(--ink-solid);
 }
 
@@ -82,11 +110,13 @@ html, body {
   color: var(--subtle-gray);
   cursor: pointer;
   font-family: var(--font-body);
-  font-size: 11px;
+  font-size: 15px;
   font-weight: 600;
+  height: 28px;
   line-height: 1;
-  padding: 6px 8px;
+  padding: 0;
   transition: border-color 0.15s, color 0.15s;
+  width: 28px;
 }
 .settings-button:hover,
 .settings-button.is-active {
@@ -100,6 +130,7 @@ html, body {
 }
 
 body.is-admin-mode .tabs,
+body.is-admin-mode .header-actions,
 body.is-admin-mode .settings-button {
   display: none;
 }
