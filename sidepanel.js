@@ -3718,7 +3718,7 @@ aksesBtn.addEventListener("click", async () => {
       },
     });
     if (!result?.text) {
-      setButtonState(aksesBtn, "error", "CPPT tidak terbaca", { temporary: false });
+      setButtonState(aksesBtn, "error", "CPPT tidak terbaca");
       toast("Pastikan sudah berada di halaman CPPT Ruangan", "error");
       return;
     }
@@ -3759,7 +3759,7 @@ aksesBtn.addEventListener("click", async () => {
     toast("CPPT berhasil di akses", "success");
   } catch (e) {
     console.error(e);
-    setButtonState(aksesBtn, "error", "CPPT tidak terbaca", { temporary: false });
+    setButtonState(aksesBtn, "error", "CPPT tidak terbaca");
     toast("Pastikan sudah berada di halaman CPPT Ruangan", "error");
   }
 });
