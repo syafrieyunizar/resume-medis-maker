@@ -333,7 +333,7 @@ async function getActiveTabUrl() {
 function extractPatientDraftId(url) {
   const text = String(url || "");
   const patterns = [
-    /\/pemeriksaanranap\/([^/?#]+)/i,
+    /\/pemeriksaan(?:ranap|igd)\/([^/?#]+)/i,
     /\/erm\/(?:c_labpk|r_labpk|c_radiologi|r_radiologi)\/([^/?#]+)/i,
   ];
   for (const pattern of patterns) {
