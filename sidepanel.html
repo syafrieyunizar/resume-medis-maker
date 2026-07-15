@@ -495,6 +495,21 @@
       </section>
     </main>
 
+    <div id="ocrModal" class="full-panel-modal" hidden role="dialog" aria-modal="true" aria-labelledby="ocrModalTitle">
+      <div class="full-panel-dialog ocr-dialog">
+        <div>
+          <h2 id="ocrModalTitle" class="section-title">Hasil OCR</h2>
+          <p id="ocrModalMeta" class="modal-message">-</p>
+        </div>
+        <textarea id="ocrModalText" class="textarea textarea-long" rows="12" placeholder="Hasil OCR akan muncul di sini dan dapat diedit..."></textarea>
+        <p class="modal-message ocr-warning">Hasil OCR dari gambar wajib diteliti manual.</p>
+        <div class="action-row ocr-actions">
+          <button id="ocrModalSave" class="btn btn-primary btn-small" type="button">Simpan</button>
+          <button id="ocrModalCancel" class="btn btn-outline btn-small" type="button">Batal</button>
+          <button id="ocrModalDelete" class="btn btn-outline btn-small" type="button">Hapus File</button>
+        </div>
+      </div>
+    </div>
     <div id="decisionModal" class="full-panel-modal" hidden role="dialog" aria-modal="true" aria-labelledby="decisionModalTitle">
       <div class="full-panel-dialog">
         <div>
@@ -511,6 +526,7 @@
     <div id="toast" class="toast" hidden></div>
 
     <script src="vendor/pdf.min.js"></script>
+    <script src="vendor/tesseract/tesseract.min.js"></script>
     <script src="sidepanel.js"></script>
   </body>
 </html>

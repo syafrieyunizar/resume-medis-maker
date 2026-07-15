@@ -637,6 +637,10 @@ body.is-admin-mode .settings-button {
   padding: 8px 10px;
   background: var(--canvas-white);
 }
+.pulled-item.is-ocr-pending {
+  background: #fff1f2;
+  border-color: #fecdd3;
+}
 
 .pulled-item-main {
   min-width: 0;
@@ -659,6 +663,39 @@ body.is-admin-mode .settings-button {
   font-size: 11px;
   margin-top: 2px;
   overflow-wrap: anywhere;
+}
+
+.pulled-item-warning {
+  color: #b91c1c;
+  font-size: 11px;
+  line-height: 1.35;
+  margin-top: 4px;
+  overflow-wrap: anywhere;
+}
+.pulled-item-warning a {
+  color: var(--ink-solid);
+  font-weight: 700;
+}
+.pulled-item-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin-top: 6px;
+}
+.pulled-item-actions .btn-small,
+.pulled-item-actions a.btn-small {
+  min-height: 24px;
+  padding: 4px 7px;
+}
+.ocr-dialog {
+  max-width: 420px;
+}
+.ocr-warning {
+  color: #b91c1c;
+  margin: 0;
+}
+.ocr-actions {
+  gap: 6px;
 }
 
 .btn-remove {

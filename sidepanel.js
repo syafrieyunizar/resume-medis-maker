@@ -884,6 +884,28 @@ async function initDraftSystem() {
   }, 1500);
 }
 
+const IMAGE_PENUNJANG_MANUAL_WARNING = "File PDF ini berupa gambar. Mohon diteliti manual.";
+let activeOcrIndex = -1;
+
+function isOcrPending(item) {
+  return Boolean(item?.requiresManualReview && !isMeaningfulText(item.ocrText));
+}
+
+function getSummarizablePenunjangFiles() {
+  return state.penunjangFiles.filter((file) => !file.requiresManualReview || isMeaningfulText(file.ocrText));
+}
+
+function getPendingOcrFiles() {
+  return state.penunjangFiles.filter(isOcrPending);
+}
+
+function removePenunjangFileAt(index) {
+  state.penunjangFiles.splice(index, 1);
+  updatePenunjangList();
+  scheduleDraftSave();
+  toast("Data tarikan dihapus", "success");
+}
+
 function updatePenunjangList() {
   const list = $("#penunjangList");
   if (!list) return;
@@ -899,6 +921,7 @@ function updatePenunjangList() {
   state.penunjangFiles.forEach((item, idx) => {
     const row = document.createElement("div");
     row.className = "pulled-item";
+    if (isOcrPending(item)) row.classList.add("is-ocr-pending");
 
     const main = document.createElement("div");
     main.className = "pulled-item-main";
@@ -912,22 +935,55 @@ function updatePenunjangList() {
 
     const meta = document.createElement("div");
     meta.className = "pulled-item-meta";
-    meta.textContent = `${item.kind || "Penunjang"} - ${item.code || "HASIL"} - ${formatBytes(item.size)}`;
-
-    const remove = document.createElement("button");
-    remove.type = "button";
-    remove.className = "btn-remove";
-    remove.textContent = "X";
-    remove.setAttribute("aria-label", `Hapus tarikan data ${idx + 1}`);
-    remove.addEventListener("click", () => {
-      state.penunjangFiles.splice(idx, 1);
-      updatePenunjangList();
-      scheduleDraftSave();
-      toast("Data tarikan dihapus", "success");
-    });
+    meta.textContent = item.requiresManualReview
+      ? `${item.kind || "Berkas gambar"} - ${item.room || "-"} - ${isMeaningfulText(item.ocrText) ? "OCR tersimpan" : "review manual"}`
+      : `${item.kind || "Penunjang"} - ${item.code || "HASIL"} - ${formatBytes(item.size)}`;
 
     main.append(title, meta);
-    row.append(main, remove);
+
+    if (item.requiresManualReview) {
+      const warning = document.createElement("div");
+      warning.className = "pulled-item-warning";
+      warning.textContent = item.warning || IMAGE_PENUNJANG_MANUAL_WARNING;
+      const actions = document.createElement("div");
+      actions.className = "pulled-item-actions";
+
+      if (item.url) {
+        const open = document.createElement("a");
+        open.className = "btn btn-outline btn-small";
+        open.href = item.url;
+        open.target = "_blank";
+        open.rel = "noopener noreferrer";
+        open.textContent = "Buka berkas";
+        actions.append(open);
+      }
+
+      const ocr = document.createElement("button");
+      ocr.type = "button";
+      ocr.className = "btn btn-outline btn-small";
+      ocr.textContent = isMeaningfulText(item.ocrText) ? "Edit OCR" : "Proses dengan OCR";
+      ocr.addEventListener("click", () => processPenunjangOcr(idx, ocr));
+      actions.append(ocr);
+
+      const remove = document.createElement("button");
+      remove.type = "button";
+      remove.className = "btn btn-outline btn-small";
+      remove.textContent = "Hapus";
+      remove.addEventListener("click", () => removePenunjangFileAt(idx));
+      actions.append(remove);
+
+      main.append(warning, actions);
+      row.append(main);
+    } else {
+      const remove = document.createElement("button");
+      remove.type = "button";
+      remove.className = "btn-remove";
+      remove.textContent = "X";
+      remove.setAttribute("aria-label", `Hapus tarikan data ${idx + 1}`);
+      remove.addEventListener("click", () => removePenunjangFileAt(idx));
+      row.append(main, remove);
+    }
+
     list.append(row);
   });
   if (summarizePenunjangBtn) summarizePenunjangBtn.disabled = false;
@@ -1331,6 +1387,8 @@ function compactParsedDocs(files) {
     index: index + 1,
     date: file.resultDate,
     kind: file.kind,
+    manualReviewRequired: Boolean(file.requiresManualReview),
+    warning: file.requiresManualReview ? IMAGE_PENUNJANG_MANUAL_WARNING : "",
     parser: sanitizePenunjangValue(file.parsed?.structured || null),
   }));
 }
@@ -1343,6 +1401,20 @@ function getPenunjangDisplayName(file) {
 async function parsePenunjangFilesWithPdfJs(files) {
   const failures = [];
   for (const file of files) {
+    if (file.requiresManualReview) {
+      file.parsed = {
+        structured: {
+          type: "image_attachment",
+          date: file.resultDate || "",
+          document: file.kind || "Berkas gambar",
+          room: file.room || "",
+          manualReviewRequired: true,
+          warning: IMAGE_PENUNJANG_MANUAL_WARNING,
+          rawExcerpt: file.ocrText || "",
+        },
+      };
+      continue;
+    }
     try {
       file.parsed = await extractPdfWithPdfJs(file);
       if (!file.resultDate) file.resultDate = file.parsed.structured?.date || "";
@@ -2730,6 +2802,7 @@ OUTPUT FORMAT:
 - Jangan gunakan bullet point.
 - Abaikan hasil normal yang tidak relevan.
 - Abaikan detail yang tidak mengubah makna klinis.
+- Bila data berisi manualReviewRequired/warning untuk berkas gambar, sertakan peringatan singkat: File PDF ini berupa gambar. Mohon diteliti manual.
 - Jaga sangat ringkas dan bergaya resume medis dokter saat pasien pulang.
 
 CONTOH:
@@ -4098,6 +4171,116 @@ ATURAN KELENGKAPAN CPPT:
   }
 });
 
+async function renderPdfBlobForOcr(blob) {
+  if (!window.pdfjsLib) throw new Error("PDF.js belum tersedia untuk membaca PDF gambar.");
+  const doc = await window.pdfjsLib.getDocument({ data: (await blob.arrayBuffer()).slice(0) }).promise;
+  const canvases = [];
+  for (let pageNo = 1; pageNo <= doc.numPages; pageNo += 1) {
+    const page = await doc.getPage(pageNo);
+    const viewport = page.getViewport({ scale: 2 });
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.ceil(viewport.width);
+    canvas.height = Math.ceil(viewport.height);
+    await page.render({ canvasContext: canvas.getContext("2d"), viewport }).promise;
+    canvases.push(canvas);
+  }
+  return canvases;
+}
+
+async function runNativeImageOcr(item, onProgress = null) {
+  if (!window.Tesseract?.createWorker) {
+    throw new Error("Tesseract OCR belum tersedia di extension. Reload extension lalu coba lagi.");
+  }
+  const response = await fetch(item.url, { credentials: "include" });
+  if (!response.ok) throw new Error(`HTTP ${response.status}`);
+  const blob = await response.blob();
+  const isPdf = /pdf/i.test(blob.type || "") || /\.pdf(?:$|[?#])/i.test(item.url || "");
+  const images = isPdf ? await renderPdfBlobForOcr(blob) : [blob];
+  const worker = await Tesseract.createWorker("ind+eng", 1, {
+    workerPath: chrome.runtime.getURL("vendor/tesseract/worker.min.js"),
+    corePath: chrome.runtime.getURL("vendor/tesseract/tesseract-core-lstm.wasm.js"),
+    langPath: chrome.runtime.getURL("vendor/tesseract/lang"),
+    cacheMethod: "none",
+    workerBlobURL: false,
+    logger: (m) => {
+      if (!onProgress || !m?.progress) return;
+      onProgress(`OCR ${Math.round(m.progress * 100)}%`);
+    },
+  });
+  try {
+    const chunks = [];
+    for (let i = 0; i < images.length; i += 1) {
+      onProgress?.(images.length > 1 ? `OCR ${i + 1}/${images.length}` : "OCR...");
+      const { data } = await worker.recognize(images[i]);
+      chunks.push(normalizeErmText(data?.text || "").trim());
+    }
+    return chunks.filter(Boolean).join("\n\n");
+  } finally {
+    await worker.terminate();
+  }
+}
+
+function openOcrModal(index, text = "") {
+  const item = state.penunjangFiles[index];
+  if (!item) return;
+  activeOcrIndex = index;
+  $("#ocrModalTitle").textContent = `Hasil OCR - ${item.kind || "Berkas gambar"}`;
+  $("#ocrModalMeta").textContent = `${item.resultDate || "-"} | ${item.room || "-"}`;
+  $("#ocrModalText").value = text || item.ocrText || "";
+  $("#ocrModal").hidden = false;
+  queueAutoGrowTextareas($("#ocrModal"));
+}
+
+function closeOcrModal() {
+  activeOcrIndex = -1;
+  $("#ocrModal").hidden = true;
+}
+
+async function processPenunjangOcr(index, button) {
+  const item = state.penunjangFiles[index];
+  if (!item) return;
+  if (isMeaningfulText(item.ocrText)) {
+    openOcrModal(index, item.ocrText);
+    return;
+  }
+  const defaultText = button.textContent;
+  button.disabled = true;
+  button.textContent = "OCR...";
+  try {
+    const text = await runNativeImageOcr(item, (label) => { button.textContent = label; });
+    if (!isMeaningfulText(text)) throw new Error("OCR tidak menemukan teks. Silakan buka berkas dan isi hasil bacaan manual di modal OCR.");
+    openOcrModal(index, text);
+    toast("OCR selesai. Silakan review hasilnya.", "success");
+  } catch (error) {
+    openOcrModal(index, item.ocrText || "");
+    toast(error.message, "error");
+  } finally {
+    button.disabled = false;
+    button.textContent = defaultText;
+  }
+}
+
+$("#ocrModalCancel")?.addEventListener("click", closeOcrModal);
+$("#ocrModalSave")?.addEventListener("click", () => {
+  const item = state.penunjangFiles[activeOcrIndex];
+  if (!item) return;
+  const ocrText = normalizeErmText($("#ocrModalText")?.value || "").trim();
+  if (!isMeaningfulText(ocrText)) {
+    toast("Isi hasil OCR terlebih dahulu atau hapus file.", "error");
+    return;
+  }
+  item.ocrText = ocrText;
+  item.ocrUpdatedAt = new Date().toISOString();
+  updatePenunjangList();
+  scheduleDraftSave();
+  closeOcrModal();
+  toast("Hasil OCR disimpan", "success");
+});
+$("#ocrModalDelete")?.addEventListener("click", () => {
+  if (activeOcrIndex < 0) return;
+  removePenunjangFileAt(activeOcrIndex);
+  closeOcrModal();
+});
 // ---------------- Tindak Lanjut: Tarik data penunjang PDF ----------------
 const pullPenunjangBtn = $("#pullPenunjang");
 const summarizePenunjangBtn = $("#summarizePenunjang");
@@ -4316,6 +4499,38 @@ async function pullPenunjangData({ filterByPeriod, dateRange = null }) {
           return asUrl(match?.[1] || "");
         };
 
+        const getImageAttachmentRows = () => {
+          const imageTable = document.querySelector("#DataTables_Table_2");
+          const imageRows = Array.from(imageTable?.querySelectorAll?.("tbody tr") || []).filter((row) => {
+            const style = window.getComputedStyle(row);
+            return style.display !== "none" && style.visibility !== "hidden";
+          });
+          return imageRows
+            .map((tr) => {
+              const cells = Array.from(tr.querySelectorAll("td")).map((td) =>
+                (td.innerText || td.textContent || "").replace(/\s+/g, " ").trim()
+              );
+              const link = Array.from(tr.querySelectorAll("a[href]")).find((a) =>
+                /lihat/i.test((a.textContent || "").trim())
+              ) || tr.querySelector("a[href]");
+              const url = asUrl(link?.getAttribute?.("href") || "");
+              const resultDate = cells.find((cell) => /^\d{4}-\d{2}-\d{2}/.test(cell)) || "";
+              const kind = cells[3] || "Berkas gambar";
+              if (!url) return null;
+              return {
+                ok: true,
+                name: kind,
+                url,
+                code: "LIHAT",
+                resultDate,
+                kind,
+                room: cells[1] || "",
+                requiresManualReview: true,
+                warning: "File PDF ini berupa gambar. Mohon diteliti manual.",
+              };
+            })
+            .filter(Boolean);
+        };
         const rows = [];
         for (let i = 0; i < bodyRows.length; i += 1) {
           const tr = bodyRows[i];
@@ -4345,15 +4560,18 @@ async function pullPenunjangData({ filterByPeriod, dateRange = null }) {
 
           rows.push({ ok: true, name, url, code, resultDate, kind });
         }
-        return { total: bodyRows.length, rows };
+        return { total: bodyRows.length, rows, imageRows: getImageAttachmentRows() };
       },
     });
 
     let candidateRows = (result?.rows || []).filter((row) => row.ok && row.url);
+    let imageRows = (result?.imageRows || []).filter((row) => row.ok && row.url);
     if (dateRange) {
       candidateRows = candidateRows.filter((row) => isWithinDateRange(row.resultDate, dateRange.start, dateRange.end));
+      imageRows = imageRows.filter((row) => isWithinDateRange(row.resultDate, dateRange.start, dateRange.end));
     } else if (filterByPeriod) {
       candidateRows = candidateRows.filter((row) => isWithinCarePeriod(row.resultDate));
+      imageRows = imageRows.filter((row) => isWithinCarePeriod(row.resultDate));
     }
     const okRows = [];
     const smallRows = [];
@@ -4383,23 +4601,25 @@ async function pullPenunjangData({ filterByPeriod, dateRange = null }) {
         failedRows.push({ ...row, ok: false, error: error.message });
       }
     }
-    const addedRows = mergePenunjangFiles(okRows);
+    const addedRows = mergePenunjangFiles([...okRows, ...imageRows]);
     updatePenunjangList();
     summarizePenunjangBtn.disabled = state.penunjangFiles.length === 0;
 
+    const manualReviewCount = addedRows.filter((row) => row.requiresManualReview).length;
     if (addedRows.length > 0) {
       setButtonState(pullPenunjangBtn, "success", "✓ Data Ditarik");
       status.className = "status";
       status.textContent =
         summarizePulledKinds(addedRows) +
         `${smallRows.length ? `, ${smallRows.length} diabaikan karena kurang dari 10 KB` : ""}` +
-        `${failedRows.length ? `, ${failedRows.length} gagal` : ""}.`;
+        `${failedRows.length ? `, ${failedRows.length} gagal` : ""}.` +
+        `${manualReviewCount ? ` ${manualReviewCount} berkas gambar perlu review manual.` : ""}`;
       if (smallRows.length) {
         toast(`${smallRows.length} data penunjang diabaikan karena ukuran file kurang dari 10 KB`, "error");
       } else {
         toast("Data penunjang berhasil ditarik", "success");
       }
-    } else if (okRows.length > 0) {
+    } else if (okRows.length > 0 || imageRows.length > 0) {
       status.className = "status";
       status.textContent =
         "Data sudah pernah ditarik, tidak ada data baru." +
@@ -4457,14 +4677,19 @@ summarizePenunjangBtn.addEventListener("click", async () => {
   summarizePenunjangBtn.disabled = true;
 
   try {
-    await progress.setProgress(`Memproses ${state.penunjangFiles.length} data penunjang...`, 10);
+    const filesForSummary = getSummarizablePenunjangFiles();
+    const pendingOcrFiles = getPendingOcrFiles();
+    if (!filesForSummary.length) {
+      throw new Error(`${pendingOcrFiles.length} berkas gambar belum OCR dan tidak ikut dirangkum.`);
+    }
+    await progress.setProgress(`Memproses ${filesForSummary.length} data penunjang...`, 10);
     const ai = await getEffectiveAiSettings();
     await progress.setProgress("Menyiapkan data penunjang...", 22);
     let summary = "";
 
     if (ai.source === "admin") {
       await progress.setProgress("Mencoba parser lokal PDF.js untuk API key admin...", 35);
-      const parsedDocs = await parsePenunjangFilesWithPdfJs(state.penunjangFiles);
+      const parsedDocs = await parsePenunjangFilesWithPdfJs(filesForSummary);
       await progress.setProgress("Merangkum dengan API key admin...", 60);
       progress.startWaiting("Menunggu respons AI penunjang");
       summary = await callAdminAiText({
@@ -4477,7 +4702,7 @@ summarizePenunjangBtn.addEventListener("click", async () => {
       progress.stop();
     } else if (ai.provider === "gemini") {
       await progress.setProgress("Mengekstrak PDF lokal sebelum dikirim ke Gemini...", 35);
-      const parsedDocs = await parsePenunjangFilesWithPdfJs(state.penunjangFiles);
+      const parsedDocs = await parsePenunjangFilesWithPdfJs(filesForSummary);
       await progress.setProgress("Merangkum data penunjang tersanitasi dengan Gemini...", 60);
       progress.startWaiting("Menunggu respons AI penunjang");
       summary = await callGeminiForPenunjangParsedDocs({
@@ -4488,7 +4713,7 @@ summarizePenunjangBtn.addEventListener("click", async () => {
       progress.stop();
     } else {
       await progress.setProgress("Mencoba parser lokal PDF.js...", 35);
-      const parsedDocs = await parsePenunjangFilesWithPdfJs(state.penunjangFiles);
+      const parsedDocs = await parsePenunjangFilesWithPdfJs(filesForSummary);
       try {
         const providerLabel = getProviderDisplay(ai.provider, ai.providerLabel);
         await progress.setProgress(`PDF berhasil diekstrak dan disanitasi. Merangkum dengan ${providerLabel}...`, 60);
@@ -4524,7 +4749,7 @@ summarizePenunjangBtn.addEventListener("click", async () => {
     $("#penunjangSummary").value = formatPenunjangSummary(summary);
     queueAutoGrowTextareas();
     scheduleDraftSave();
-    progress.complete("Selesai. Rangkuman dapat diedit di field Pemeriksaan Penunjang Bermakna.");
+    progress.complete("Selesai. Rangkuman dapat diedit di field Pemeriksaan Penunjang Bermakna." + (pendingOcrFiles.length ? ` ${pendingOcrFiles.length} berkas gambar belum OCR dan tidak ikut dirangkum.` : ""));
     toast("Rangkuman penunjang selesai", "success");
   } catch (e) {
     console.error(e);
