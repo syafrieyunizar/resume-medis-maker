@@ -516,16 +516,12 @@ function renderCpptDiagnosisSupport(data = {}) {
 
   const suggestBox = $("#cpptDiagnosisSuggestBox");
   const hasSuggestion = [data.saran_dx_utama, data.saran_dx_sekunder].some(isMeaningfulText);
-  if (suggestBox) {
-    suggestBox.hidden = !hasSuggestion;
-    suggestBox.open = hasSuggestion;
-  }
+  if (suggestBox && hasSuggestion) suggestBox.open = true;
 
   const reason = $("#cpptDiagnosisReason");
-  const reasonText = normalizeErmText(data.alasan_saran_dx || "").trim();
   if (reason) {
-    reason.hidden = !reasonText;
-    reason.textContent = reasonText ? `Alasan saran diagnosis: ${reasonText}` : "";
+    reason.hidden = true;
+    reason.textContent = "";
   }
 
   const gaps = normalizeCpptGaps(data.cppt_gaps);
@@ -552,6 +548,86 @@ function renderCpptDiagnosisSupport(data = {}) {
   });
 }
 
+let cpptDiagnosisStatusTimer = null;
+
+function showCpptDiagnosisStatus(className, message, duration = 3500) {
+  const status = $("#cpptDiagnosisStatus");
+  if (!status) return;
+  clearTimeout(cpptDiagnosisStatusTimer);
+  status.hidden = false;
+  status.className = className;
+  status.textContent = message;
+  if (duration) {
+    cpptDiagnosisStatusTimer = setTimeout(() => {
+      status.hidden = true;
+      status.textContent = "";
+    }, duration);
+  }
+}
+
+function collectCpptDiagnosisContext() {
+  const results = collectCpptResultFields();
+  return {
+    periode_rawat: state.cpptSummary?.periodText || "",
+    soap: {
+      subjektif: normalizeErmText($("#soSubjektif")?.value || ""),
+      objektif: normalizeErmText($("#soObjektif")?.value || ""),
+      assessment: normalizeErmText($("#soAssessment")?.value || ""),
+      planning: normalizeErmText($("#soPlanning")?.value || ""),
+      konsultasi: normalizeErmText($("#soKonsultasi")?.value || ""),
+      vitals: state.soapVitals,
+    },
+    cppt: {
+      raw: truncateText(state.cpptText, 7000),
+      hasil_resume: results,
+    },
+    penunjang: {
+      dari_cppt: normalizeErmText(state.cpptPenunjang || results.penunjang || ""),
+      ringkasan_pdf: normalizeErmText($("#penunjangSummary")?.value || ""),
+    },
+  };
+}
+
+function getMissingCpptDiagnosisContext(context) {
+  const hasSoap = Object.entries(context.soap || {})
+    .filter(([key]) => key !== "vitals")
+    .some(([, value]) => isMeaningfulText(value));
+  const hasCppt = isMeaningfulText(context.cppt?.raw) || Object.values(context.cppt?.hasil_resume || {}).some(isMeaningfulText);
+  const hasPenunjang = [context.penunjang?.dari_cppt, context.penunjang?.ringkasan_pdf].some(isMeaningfulText);
+  return [!hasSoap && "SOAP", !hasCppt && "CPPT", !hasPenunjang && "Penunjang/Lab"].filter(Boolean);
+}
+
+const cpptDiagnosisSchema = {
+  type: "object",
+  properties: {
+    saran_dx_utama: { type: "string" },
+    saran_dx_sekunder: { type: "string" },
+  },
+  required: ["saran_dx_utama", "saran_dx_sekunder"],
+};
+
+function formatCpptDiagnosisPrompt(context) {
+  return `Tinjau data resume medis secara komprehensif dari SOAP, CPPT, dan penunjang.
+
+ATURAN:
+- Output adalah bantuan AI, bukan diagnosis final.
+- Jangan tulis dasar temuan/alasan.
+- Diagnosis utama maksimal 1 diagnosis, atau 2 bila sangat terkait.
+- Diagnosis sekunder maksimal 3-6 diagnosis inti, dipisahkan koma.
+- Jangan mengarang diagnosis bila data tidak mendukung.
+- Jawaban wajib JSON valid saja dengan key: saran_dx_utama, saran_dx_sekunder.
+
+DATA:
+${JSON.stringify(context, null, 2)}`;
+}
+
+function normalizeCpptDiagnosisAiResult(parsed = {}) {
+  const payload = parsed?.result || parsed?.hasil || parsed?.data || parsed?.output || parsed;
+  return {
+    saran_dx_utama: firstStringValue(payload, ["saran_dx_utama", "dx_utama", "diagnosis_utama", "diagnosa_utama", "Diagnosis utama (AI)"]),
+    saran_dx_sekunder: firstStringValue(payload, ["saran_dx_sekunder", "dx_sekunder", "diagnosis_sekunder", "diagnosa_sekunder", "Diagnosis sekunder (AI)"]),
+  };
+}
 function collectDraftData() {
   return {
     version: 1,
@@ -3617,6 +3693,62 @@ $("#cpptResults")?.addEventListener("click", (event) => {
   if (button) applyCpptDiagnosisSuggestion(button);
 });
 
+$("#generateCpptDiagnosis")?.addEventListener("click", async (event) => {
+  const button = event.currentTarget;
+  const defaultText = button.dataset.defaultText || button.textContent;
+  button.dataset.defaultText = defaultText;
+  const context = collectCpptDiagnosisContext();
+  const missing = getMissingCpptDiagnosisContext(context);
+  if (missing.length) {
+    showCpptDiagnosisStatus("status is-error", `Data belum lengkap: ${missing.join(", ")}.`, 3500);
+    button.classList.remove("btn-outline");
+    button.classList.add("btn-error");
+    button.textContent = "Data belum lengkap";
+    clearTimeout(button._stateTimer);
+    button._stateTimer = setTimeout(() => {
+      button.classList.remove("btn-error");
+      button.classList.add("btn-outline");
+      button.textContent = defaultText;
+    }, 3000);
+    return;
+  }
+
+  try {
+    button.disabled = true;
+    button.textContent = "Menganalisis diagnosis...";
+    showCpptDiagnosisStatus("status is-loading", "Menganalisis diagnosis dengan AI...", 0);
+    const ai = await getEffectiveAiSettings();
+    const prompt = formatCpptDiagnosisPrompt(context);
+    const text = ai.source === "admin"
+      ? await callAdminAiText({ prompt, responseJson: true, responseSchema: cpptDiagnosisSchema, userSession: ai.adminUserSession })
+      : await callProviderText({
+          provider: ai.provider,
+          apiKey: ai.apiKey,
+          model: ai.model,
+          prompt,
+          baseUrl: ai.baseUrl,
+          providerLabel: ai.providerLabel,
+        });
+    const result = normalizeCpptDiagnosisAiResult(parseJsonResponse(text));
+    if (![result.saran_dx_utama, result.saran_dx_sekunder].some(isMeaningfulText)) {
+      throw new Error("Respons diagnosis kosong dari provider");
+    }
+    renderCpptDiagnosisSupport(result);
+    scheduleDraftSave();
+    showCpptDiagnosisStatus("status is-success", "Diagnosis AI selesai dibuat.", 2500);
+    toast("Diagnosis AI selesai", "success");
+  } catch (e) {
+    console.error(e);
+    showCpptDiagnosisStatus("status is-error", getAiErrorMessage(e, "Diagnosis dengan AI"), 5000);
+    toast("Gagal membuat diagnosis AI", "error");
+  } finally {
+    button.disabled = false;
+    button.classList.remove("btn-error");
+    button.classList.add("btn-outline");
+    button.textContent = defaultText;
+  }
+});
+
 $("#usePenunjangSummaryForCppt")?.addEventListener("click", (event) => {
   const button = event.currentTarget;
   const value = normalizeErmText($("#penunjangSummary")?.value || "").trim();
@@ -3813,16 +3945,10 @@ CONTOH GAYA YANG SALAH (jangan tiru):
 
 Berikan output untuk: Pemeriksaan Penunjang Bermakna, Terapi Selama Dirawat, Operasi/Tindakan, Diagnosa Utama, Diagnosa Sekunder, Konsultasi bidang lain, Terapi saat pulang.`;
 
-  const diagnosisPrompt = `
-ATURAN SARAN DIAGNOSIS:
-- Saran diagnosis harus pendek, klinis inti, dan tidak bertele-tele.
-- Boleh sama dengan diagnosis CPPT bila CPPT sudah tepat.
-- Jangan masukkan tahun, riwayat tindakan, atau detail panjang kecuali masih aktif/bermakna selama perawatan.
-- saran_dx_utama maksimal 1 diagnosis, atau 2 diagnosis bila sangat terkait.
-- saran_dx_sekunder maksimal 3-6 diagnosis inti, dipisahkan koma.
-- alasan_saran_dx 1-3 kalimat pendek, berisi alasan klinis utama agar DPJP tidak menerima mentah-mentah.
-- cppt_gaps berisi catatan kelengkapan CPPT, bukan perintah. Gunakan bahasa: Pertimbangkan dokumentasi ... bila sesuai klinis.
-- Jangan membuat diagnosis tanpa bukti CPPT/penunjang/terapi yang kuat.
+  const cpptGapPrompt = `
+ATURAN KELENGKAPAN CPPT:
+- cppt_gaps berisi catatan kelengkapan CPPT, bukan perintah.
+- Gunakan bahasa: Pertimbangkan dokumentasi ... bila sesuai klinis.
 `;
 
   const schema = {
@@ -3835,9 +3961,6 @@ ATURAN SARAN DIAGNOSIS:
       dx_sekunder: { type: "string" },
       konsul: { type: "string" },
       terapi_pulang: { type: "string" },
-      saran_dx_utama: { type: "string" },
-      saran_dx_sekunder: { type: "string" },
-      alasan_saran_dx: { type: "string" },
       cppt_gaps: {
         type: "array",
         items: {
@@ -3859,9 +3982,6 @@ ATURAN SARAN DIAGNOSIS:
       "dx_sekunder",
       "konsul",
       "terapi_pulang",
-      "saran_dx_utama",
-      "saran_dx_sekunder",
-      "alasan_saran_dx",
       "cppt_gaps",
     ],
   };
@@ -3877,8 +3997,8 @@ ATURAN SARAN DIAGNOSIS:
       "Data CPPT:\n\n" +
       state.cpptText +
       "\n\n" +
-      diagnosisPrompt +
-      "\n\nKembalikan JSON object dengan key PERSIS berikut: penunjang, terapi_dirawat, operasi, dx_utama, dx_sekunder, konsul, terapi_pulang, saran_dx_utama, saran_dx_sekunder, alasan_saran_dx, cppt_gaps. Jangan gunakan key lain. Field operasi harus berisi tindakan/prosedur/intervensi bermakna termasuk NGT, DC, oksigenasi, nebulisasi, EKG, EEG, Echo, transfusi, HD, dan sejenisnya bila ada. Jangan masukkan tindakan rutin umum seperti infus biasa atau injeksi obat rutin. Jika tidak ada data, isi string dengan '-' dan cppt_gaps dengan array kosong.";
+      cpptGapPrompt +
+      "\n\nKembalikan JSON object dengan key PERSIS berikut: penunjang, terapi_dirawat, operasi, dx_utama, dx_sekunder, konsul, terapi_pulang, cppt_gaps. Jangan gunakan key lain. Field operasi harus berisi tindakan/prosedur/intervensi bermakna termasuk NGT, DC, oksigenasi, nebulisasi, EKG, EEG, Echo, transfusi, HD, dan sejenisnya bila ada. Jangan masukkan tindakan rutin umum seperti infus biasa atau injeksi obat rutin. Jika tidak ada data, isi string dengan '-' dan cppt_gaps dengan array kosong.";
 
     let text;
     await progress.setProgress("Menghubungi AI untuk memproses CPPT...", 45);

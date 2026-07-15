@@ -118,7 +118,7 @@
         <div id="settingsStatus" class="status" hidden></div>
 
         <details class="collapsible settings-group">
-          <summary>Admin Knowledge BPJS</summary>
+          <summary>MENU KHUSUS ADMIN</summary>
           <div class="collapsible-body">
             <label class="field">
               <span class="label">Username</span>
@@ -136,7 +136,7 @@
         <div id="knowledgeAdminPanel" class="admin-panel" hidden>
           <div class="admin-header">
             <div>
-              <span class="label">Admin Knowledge BPJS</span>
+              <span class="label">MENU KHUSUS ADMIN</span>
               <h2 class="section-title">Pengaturan Admin</h2>
             </div>
             <button id="exitKnowledgeAdmin" class="btn btn-outline" type="button">Keluar Admin</button>
@@ -360,19 +360,23 @@
             <span class="label">Diagnosa Sekunder</span>
             <textarea class="textarea" rows="3" data-key="dx_sekunder"></textarea>
           </div>
-          <details id="cpptDiagnosisSuggestBox" class="cppt-dx-suggestions" hidden>
+          <details id="cpptDiagnosisSuggestBox" class="cppt-dx-suggestions" open>
             <summary>Saran Diagnosis &#129504;</summary>
+            <div class="cppt-dx-action-row">
+              <button id="generateCpptDiagnosis" class="btn btn-outline btn-small" type="button">&#129504; Buat Diagnosis dengan AI</button>
+            </div>
+            <div id="cpptDiagnosisStatus" class="status cppt-dx-status" hidden></div>
             <div class="cppt-dx-suggestion-list">
               <div id="cpptDxUtamaSuggest" class="cppt-ai-suggest" hidden>
                 <div>
-                  <span class="label">Diagnosis Utama</span>
+                  <span class="label">Diagnosis utama (AI)</span>
                   <div class="cppt-ai-suggest-text"></div>
                 </div>
                 <button class="btn btn-outline btn-small" type="button" data-dx-action="replace" data-source="cpptDxUtamaSuggest" data-target-key="dx_utama">Gunakan</button>
               </div>
               <div id="cpptDxSekunderSuggest" class="cppt-ai-suggest" hidden>
                 <div>
-                  <span class="label">Diagnosis Sekunder</span>
+                  <span class="label">Diagnosis sekunder (AI)</span>
                   <div class="cppt-ai-suggest-text"></div>
                 </div>
                 <button class="btn btn-outline btn-small" type="button" data-dx-action="replace" data-source="cpptDxSekunderSuggest" data-target-key="dx_sekunder">Gunakan</button>

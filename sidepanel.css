@@ -873,6 +873,16 @@ body.is-admin-mode .settings-button {
   font-size: 12px;
   font-weight: 700;
 }
+.cppt-dx-action-row {
+  margin-top: 8px;
+}
+.cppt-dx-action-row .btn {
+  white-space: normal;
+  width: 100%;
+}
+.cppt-dx-status {
+  margin-top: 8px;
+}
 .cppt-dx-suggestion-list {
   display: flex;
   flex-direction: column;
