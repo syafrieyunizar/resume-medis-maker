@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="id">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Privacy Policy - Resume Medis Helper RSBHHB</title>
+  <style>
+    body {
+      color: #151515;
+      font-family: Arial, sans-serif;
+      line-height: 1.6;
+      margin: 0;
+      background: #f7f7f7;
+    }
+    main {
+      background: #fff;
+      margin: 32px auto;
+      max-width: 860px;
+      padding: 32px;
+    }
+    h1, h2 {
+      line-height: 1.25;
+    }
+    h1 {
+      margin-top: 0;
+    }
+    h2 {
+      margin-top: 28px;
+    }
+    ul {
+      padding-left: 22px;
+    }
+    .muted {
+      color: #555;
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Privacy Policy</h1>
+    <p><strong>Resume Medis Helper RSBHHB</strong></p>
+    <p class="muted">Terakhir diperbarui: 15 Juli 2026</p>
+
+    <h2>Ringkasan</h2>
+    <p>
+      Resume Medis Helper RSBHHB adalah ekstensi Chrome untuk membantu user membuat dan mereview resume medis pada sistem eRM internal. Ekstensi ini bekerja atas perintah user, misalnya saat user menekan tombol untuk menarik data SOAP, CPPT, penunjang, menjalankan AI, atau memasukkan hasil ke resume.
+    </p>
+
+    <h2>Data yang Dapat Diproses</h2>
+    <p>Ekstensi dapat membaca dan memproses data yang tampil pada halaman eRM yang sedang dibuka oleh user, termasuk:</p>
+    <ul>
+      <li>Data SOAP, CPPT, resume medis, diagnosis, terapi, tindakan, konsultasi, tanda vital, dan pemeriksaan penunjang.</li>
+      <li>Isi PDF hasil penunjang yang dibuka melalui alur penunjang.</li>
+      <li>Draft lokal yang dibuat dari pekerjaan user di side panel.</li>
+      <li>Pengaturan user seperti pilihan provider AI, model, API key pribadi, dan sesi admin.</li>
+    </ul>
+
+    <h2>Tujuan Penggunaan Data</h2>
+    <p>Data digunakan hanya untuk fungsi ekstensi, yaitu:</p>
+    <ul>
+      <li>Menarik dan menampilkan data medis dari halaman eRM aktif.</li>
+      <li>Menyusun ringkasan CPPT, SOAP, penunjang, analisa klaim, dan bantuan diagnosis berbasis AI bila user menjalankan fitur tersebut.</li>
+      <li>Mengisi field resume medis atau RM 07 setelah user menekan tombol yang sesuai.</li>
+      <li>Menyimpan draft lokal agar pekerjaan user tidak hilang saat berpindah halaman pasien.</li>
+      <li>Mengelola akses admin, konfigurasi provider AI admin, dan knowledge BPJS melalui backend Supabase.</li>
+    </ul>
+
+    <h2>Penyimpanan Data</h2>
+    <ul>
+      <li>Draft pasien disimpan secara lokal di browser user menggunakan IndexedDB.</li>
+      <li>Pengaturan user dan API key pribadi disimpan secara lokal di browser user menggunakan chrome.storage.local.</li>
+      <li>API key pribadi tidak dikirim ke server pengelola ekstensi, kecuali digunakan langsung oleh browser user untuk memanggil provider AI yang dipilih user.</li>
+      <li>Konfigurasi API key admin, user admin, dan knowledge BPJS disimpan pada Supabase untuk kebutuhan fitur admin.</li>
+    </ul>
+
+    <h2>Pengiriman Data ke Pihak Ketiga</h2>
+    <p>
+      Ekstensi dapat mengirim data klinis yang relevan ke layanan AI hanya saat user menjalankan fitur AI. Layanan AI yang dapat digunakan bergantung pada pengaturan user atau admin, misalnya Gemini, provider OpenAI-compatible, Sumopod, AImurah, X5Lab, custom endpoint, atau jalur admin melalui Supabase Edge Function.
+    </p>
+    <p>
+      Data dikirim untuk menghasilkan output yang diminta user, seperti ringkasan, review, analisa, atau saran diagnosis. Ekstensi tidak menjual data user dan tidak menggunakan data untuk iklan.
+    </p>
+
+    <h2>PDF Penunjang</h2>
+    <p>
+      Untuk fitur penunjang, ekstensi membaca PDF menggunakan parser lokal di browser bila memungkinkan. Hasil ekstraksi yang relevan dapat digunakan sebagai konteks AI setelah user menjalankan fitur rangkuman penunjang.
+    </p>
+
+    <h2>Izin Chrome yang Digunakan</h2>
+    <ul>
+      <li><strong>sidePanel</strong>: menampilkan panel bantuan resume medis.</li>
+      <li><strong>storage</strong>: menyimpan pengaturan dan draft lokal.</li>
+      <li><strong>activeTab</strong> dan <strong>scripting</strong>: membaca atau mengisi data pada halaman eRM aktif setelah user menjalankan fitur.</li>
+      <li><strong>host permissions</strong>: diperlukan agar ekstensi dapat bekerja pada alamat eRM internal yang digunakan rumah sakit.</li>
+    </ul>
+
+    <h2>Retensi dan Penghapusan</h2>
+    <p>
+      Draft lokal berada di perangkat/browser user dan dapat diganti, dipulihkan, atau dihapus melalui alur ekstensi. User juga dapat menghapus data lokal melalui pengaturan browser Chrome. Data admin dan knowledge BPJS dikelola oleh admin aplikasi.
+    </p>
+
+    <h2>Keamanan</h2>
+    <p>
+      Ekstensi membatasi pemrosesan data untuk kebutuhan fitur yang dijalankan user. Namun, karena fitur AI dapat melibatkan provider pihak ketiga, user dan admin harus memastikan penggunaan provider AI sesuai kebijakan internal rumah sakit dan peraturan privasi data yang berlaku.
+    </p>
+
+    <h2>Perubahan Kebijakan</h2>
+    <p>
+      Kebijakan ini dapat diperbarui bila terdapat perubahan fitur, provider, atau alur penyimpanan data. Versi terbaru akan dipublikasikan pada halaman ini.
+    </p>
+
+    <h2>Kontak</h2>
+    <p>
+      Untuk pertanyaan terkait privasi atau penggunaan ekstensi, hubungi pengelola internal Resume Medis Helper RSBHHB.
+    </p>
+  </main>
+</body>
+</html>
