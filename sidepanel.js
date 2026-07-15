@@ -13,6 +13,7 @@ const state = {
   soapVitals: {},
   draftKey: "",
   draftPatientId: "",
+  draftPatientName: "",
   draftRestoring: false,
   draftSaveTimer: null,
   draftSyncTimer: null,
@@ -320,9 +321,13 @@ async function cleanupExpiredDrafts() {
   });
 }
 
-async function getActiveTabUrl() {
+async function getActiveTab() {
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-  return tab?.url || "";
+  return tab || null;
+}
+
+async function getActiveTabUrl() {
+  return (await getActiveTab())?.url || "";
 }
 
 function extractPatientDraftId(url) {
@@ -338,6 +343,30 @@ function extractPatientDraftId(url) {
   return "";
 }
 
+async function getActivePatientName(tabId) {
+  if (!tabId) return "";
+  try {
+    const [{ result }] = await chrome.scripting.executeScript({
+      target: { tabId },
+      func: () => {
+        const clean = (value) => String(value || "").replace(/\s+/g, " ").trim();
+        const direct = clean(document.querySelector('td[width="44%"][style*="font-size: 18px"]')?.textContent);
+        if (direct) return direct;
+        for (const tbody of document.querySelectorAll("tbody")) {
+          const rows = tbody.querySelectorAll("tr");
+          const name = clean(rows[0]?.cells?.[0]?.textContent);
+          const identity = clean(rows[1]?.cells?.[0]?.textContent);
+          if (name && /\d+\s*\/\s*\d{4}-\d{2}-\d{2}/.test(identity)) return name;
+        }
+        return "";
+      },
+    });
+    return String(result || "").trim();
+  } catch (error) {
+    console.warn("Nama pasien draft tidak terbaca", error);
+    return "";
+  }
+}
 function formatDraftTime(value) {
   if (!value) return "-";
   return new Date(value).toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" });
@@ -381,30 +410,21 @@ function formatDraftSummary(data = {}) {
   return `SOAP ${mark(draftHasSoap(data))}  CPPT ${mark(draftHasCppt(data))}  Penunjang ${mark(draftHasPenunjang(data))}  Analisa ${mark(draftHasAnalysis(data))}`;
 }
 
-function updateDraftSummary(data = {}) {
-  const summary = $("#draftLocalSummary");
-  if (summary) summary.textContent = formatDraftSummary(data);
-}
+function updateDraftUi() {}
 
-function updateDraftUi(message = "", data = null) {
-  const status = $("#draftLocalStatus");
-  if (!status) return;
-  if (!state.draftKey) {
-    status.textContent = message || "Belum aktif - buka halaman pasien.";
-    updateDraftSummary({});
-    return;
-  }
-  const summaryData = data || collectDraftData();
-  updateDraftSummary(summaryData);
-  status.textContent = message || `Aktif: ${state.draftPatientId} - tersimpan lokal 7 hari.`;
-}
-
-function showDraftBanner(message, data = {}, kind = "") {
+function showDraftBanner(message, data = {}, kind = "", options = {}) {
   const banner = $("#draftBanner");
   const text = $("#draftBannerText");
   const summary = $("#draftBannerSummary");
   if (!banner || !text) return;
-  text.textContent = message;
+  if (options.patientName) {
+    text.textContent = "Draft ";
+    const name = document.createElement("strong");
+    name.textContent = options.patientName;
+    text.append(name, ` ${options.suffix || "dipulihkan"}`);
+  } else {
+    text.textContent = message;
+  }
   if (summary) summary.textContent = formatDraftSummary(data);
   banner.classList.toggle("is-warning", kind === "warning");
   banner.hidden = false;
@@ -655,8 +675,10 @@ async function restoreDraftIfAvailable({ manual = false } = {}) {
     return false;
   }
   applyDraftData(record.data);
-  const message = `Draft ${state.draftPatientId} dipulihkan - terakhir ${formatDraftTime(record.updatedAt)}`;
-  showDraftBanner(message, record.data);
+  const patientName = state.draftPatientName || state.draftPatientId;
+  const suffix = `dipulihkan - terakhir ${formatDraftTime(record.updatedAt)}`;
+  const message = `Draft ${patientName} ${suffix}`;
+  showDraftBanner(message, record.data, "", { patientName, suffix });
   updateDraftUi(message, record.data);
   return true;
 }
@@ -709,11 +731,13 @@ let draftContextSwitching = false;
 
 async function switchDraftContextToActiveTab({ skipSave = false } = {}) {
   if (draftContextSwitching) return false;
-  const url = await getActiveTabUrl();
-  const patientId = extractPatientDraftId(url);
+  const tab = await getActiveTab();
+  const patientId = extractPatientDraftId(tab?.url || "");
+  const patientName = patientId ? await getActivePatientName(tab?.id) : "";
   const nextKey = patientId ? `patient:${patientId}` : "";
   if (nextKey === state.draftKey) {
     state.draftPatientId = patientId;
+    if (patientName) state.draftPatientName = patientName;
     if (!state.draftKey) updateDraftUi();
     return false;
   }
@@ -725,6 +749,7 @@ async function switchDraftContextToActiveTab({ skipSave = false } = {}) {
       await saveCurrentDraftNow();
     }
     state.draftPatientId = patientId;
+    state.draftPatientName = patientName;
     state.draftKey = nextKey;
     state.draftLastSavedAt = "";
     resetSidepanelWorkspace();
@@ -4474,7 +4499,6 @@ async function handleRestoreDraftClick(event) {
 }
 
 $("#restoreDraftBanner")?.addEventListener("click", handleRestoreDraftClick);
-$("#restorePatientDraft")?.addEventListener("click", handleRestoreDraftClick);
 
 $("#clearDraftBanner")?.addEventListener("click", () => {
   clearCurrentPatientDraft().catch((error) => {
@@ -4483,12 +4507,6 @@ $("#clearDraftBanner")?.addEventListener("click", () => {
   });
 });
 
-$("#clearPatientDraft")?.addEventListener("click", () => {
-  clearCurrentPatientDraft().catch((error) => {
-    console.error(error);
-    toast("Gagal menghapus draft", "error");
-  });
-});
 
 queueAutoGrowTextareas();
 

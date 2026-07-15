@@ -197,19 +197,6 @@ body.is-admin-mode .settings-button {
   background: #fef3c7;
   color: #92400e;
 }
-.draft-local-box {
-  border: 1px solid var(--cloud-gray);
-  border-radius: 9px;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  padding: 10px 12px;
-}
-.draft-local-status {
-  color: var(--subtle-gray);
-  font-size: 12px;
-  line-height: 1.45;
-}
 .draft-summary-line {
   color: var(--ash-gray);
   font-size: 11px;
