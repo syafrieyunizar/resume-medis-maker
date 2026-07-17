@@ -4359,10 +4359,14 @@ function renderDateRangePicker() {
 }
 
 function showManualDateRange() {
-  const initialDate = state.cpptSummary?.startDate || new Date();
+  const toDateOnly = (value) => {
+    const date = value instanceof Date ? value : parseFlexibleDate(value);
+    return date && !Number.isNaN(date.getTime()) ? new Date(date.getFullYear(), date.getMonth(), date.getDate()) : null;
+  };
+  dateRangeStart = toDateOnly(state.cpptSummary?.startDate);
+  dateRangeEnd = toDateOnly(state.cpptSummary?.endDate);
+  const initialDate = dateRangeStart || new Date();
   dateRangeViewMonth = new Date(initialDate.getFullYear(), initialDate.getMonth(), 1);
-  dateRangeStart = null;
-  dateRangeEnd = null;
   pullPeriodChoices.hidden = true;
   pullPeriodCalendar.hidden = false;
   renderDateRangePicker();
