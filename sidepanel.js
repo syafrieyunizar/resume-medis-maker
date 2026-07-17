@@ -3909,46 +3909,7 @@ pullSOButton.addEventListener("click", async () => {
   }
 });
 
-const insertSOButton = $("#insertSO");
 const insertSOAPRM07Button = $("#insertSOAPRM07");
-
-insertSOButton.addEventListener("click", async () => {
-  try {
-    const subjektif = $("#soSubjektif").value;
-    const objektif = $("#soObjektif").value;
-    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-    if (!tab?.id) throw new Error("Tab aktif tidak ditemukan");
-    const [{ result }] = await chrome.scripting.executeScript({
-      target: { tabId: tab.id },
-      func: (sub, obj) => {
-        const setVal = (el, val) => {
-          if (!el) return false;
-          const proto = Object.getPrototypeOf(el);
-          const setter = Object.getOwnPropertyDescriptor(proto, "value")?.set;
-          setter ? setter.call(el, val) : (el.value = val);
-          el.dispatchEvent(new Event("input", { bubbles: true }));
-          el.dispatchEvent(new Event("change", { bubbles: true }));
-          return true;
-        };
-        const a = setVal(document.querySelector('textarea[name="ab"]'), sub);
-        const b = setVal(document.querySelector('textarea[name="ae"]'), obj);
-        return { a, b };
-      },
-      args: [subjektif, objektif],
-    });
-    if (result.a && result.b) {
-      setButtonState(insertSOButton, "success", "✓ S & O Masuk ke Resume");
-      toast("S & O dimasukkan ke resume", "success");
-    } else {
-      setButtonState(insertSOButton, "error", "Pastikan sudah berada di halaman Resume Medis");
-      toast("Pastikan sudah berada di halaman Resume Medis", "error");
-    }
-  } catch (e) {
-    console.error(e);
-    setButtonState(insertSOButton, "error", "Pastikan sudah berada di halaman Resume Medis");
-    toast("Gagal: " + e.message, "error");
-  }
-});
 
 insertSOAPRM07Button?.addEventListener("click", async () => {
   try {
@@ -5041,12 +5002,26 @@ let cpptReviewSeconds = 10;
 let cpptReviewActiveTab = "preview";
 
 function collectCpptReviewData() {
-  return CPPT_REVIEW_FIELDS.map(([key, label, resumeName]) => ({
-    key,
-    label,
-    resumeName,
-    value: normalizeErmText(document.querySelector('#cpptResults textarea[data-key="' + key + '"]')?.value ?? "").trim(),
-  }));
+  return [
+    {
+      key: "subjektif",
+      label: "Subjektif",
+      resumeName: "ab",
+      value: normalizeErmText($("#soSubjektif").value).trim(),
+    },
+    {
+      key: "objektif",
+      label: "Objektif",
+      resumeName: "ae",
+      value: normalizeErmText($("#soObjektif").value).trim(),
+    },
+    ...CPPT_REVIEW_FIELDS.map(([key, label, resumeName]) => ({
+      key,
+      label,
+      resumeName,
+      value: normalizeErmText(document.querySelector('#cpptResults textarea[data-key="' + key + '"]')?.value ?? "").trim(),
+    })),
+  ];
 }
 
 function getCpptReviewWarnings(fields) {
@@ -5056,7 +5031,7 @@ function getCpptReviewWarnings(fields) {
   const consultation = fields.find((field) => field.key === "konsul")?.value || "";
   const pendingOcr = getPendingOcrFiles().length;
 
-  if (empty.length) warnings.push(empty.length + " field masih kosong atau berisi -");
+  if (empty.length) warnings.push(empty.length + " field kosong dan tidak akan dimasukkan");
   if (diagnoses.some((field) => /\b(?:suspek|susp|mungkin|kemungkinan|ddx)\b|dd\/|\?/i.test(field.value))) {
     warnings.push("Diagnosis mengandung istilah belum pasti");
   }
@@ -5258,7 +5233,9 @@ $("#insertCPPT").addEventListener("click", async () => {
   const reviewFields = collectCpptReviewData();
   if ((await showCpptReviewModal(reviewFields)) !== "primary") return;
   try {
-    const payload = Object.fromEntries(reviewFields.map((field) => [field.resumeName, field.value]));
+    const insertableFields = reviewFields.filter((field) => field.value && field.value !== "-");
+    if (!insertableFields.length) throw new Error("Tidak ada data yang dapat dimasukkan");
+    const payload = Object.fromEntries(insertableFields.map((field) => [field.resumeName, field.value]));
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
     if (!tab?.id) throw new Error("Tab aktif tidak ditemukan");
     const [{ result }] = await chrome.scripting.executeScript({
@@ -5299,7 +5276,7 @@ $("#insertCPPT").addEventListener("click", async () => {
       args: [payload],
     });
     const missing = Object.entries(result).filter(([, ok]) => !ok).map(([k]) => k);
-    if (missing.length === 0) toast("Detail CPPT dimasukkan", "success");
+    if (missing.length === 0) toast("Semua data berhasil dimasukkan ke Resume Medis", "success");
     else toast("Pastikan anda sudah berada di Halaman Pengeditan Resume Medis", "error");
   } catch (e) {
     console.error(e);
