@@ -34,6 +34,11 @@ html, body {
   min-width: 320px;
 }
 
+html:has(.full-panel-modal:not([hidden])),
+body:has(.full-panel-modal:not([hidden])) {
+  overflow: hidden;
+}
+
 .app-header {
   position: sticky;
   top: 0;
@@ -524,22 +529,51 @@ body.is-admin-mode .claim-sticky {
   font-weight: 700;
   margin-bottom: 3px;
 }
-.claim-sticky-section-title:not(:first-child) { margin-top: 7px; }
-.claim-sticky-list {
-  margin: 0;
-  padding-left: 18px;
+.claim-sticky-section-header {
+  align-items: center;
+  display: flex;
+  justify-content: space-between;
 }
-.claim-sticky-list li { margin: 2px 0; }
-.claim-sticky-item {
+.claim-sticky-pager {
+  align-items: center;
+  display: flex;
+  font-size: 11px;
+  gap: 3px;
+}
+.claim-sticky-pager button {
   appearance: none;
   background: transparent;
   border: 0;
   color: inherit;
   cursor: pointer;
   font: inherit;
+  font-size: 15px;
+  line-height: 1;
+  padding: 1px 3px;
+}
+.claim-sticky-pager button:disabled {
+  cursor: default;
+  opacity: 0.35;
+}
+.claim-sticky-findings { margin: 0; }
+.claim-sticky-section-title:not(:first-child) { margin-top: 7px; }
+
+.claim-sticky-item {
+  appearance: none;
+  background: transparent;
+  border: 0;
+  color: inherit;
+  cursor: pointer;
+  display: grid;
+  font: inherit;
+  gap: 5px;
+  grid-template-columns: auto minmax(0, 1fr);
+  line-height: 1.45;
   padding: 0;
   text-align: left;
+  width: 100%;
 }
+.claim-sticky-item-number { font-weight: 700; }
 .claim-sticky-item:hover { text-decoration: underline; }
 #claimStickyReanalyze {
   font-size: 11px;

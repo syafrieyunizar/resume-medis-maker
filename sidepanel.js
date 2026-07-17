@@ -13,6 +13,7 @@ const state = {
   claimAnalysisStale: false,
   claimAnalysisKnowledgeCount: 0,
   claimAnalysisUpdatedAt: "",
+  claimStickyFindingIndex: 0,
   soapVitals: {},
   draftKey: "",
   draftPatientId: "",
@@ -752,6 +753,7 @@ function applyDraftData(data = {}) {
       updatePenunjangList();
     }
     state.claimAnalysisRaw = data.claim?.raw || null;
+    state.claimStickyFindingIndex = 0;
     state.claimAnalysisStale = Boolean(data.claim?.stale);
     state.claimAnalysisKnowledgeCount = Number(data.claim?.knowledgeCount || 0);
     state.claimAnalysisUpdatedAt = data.claim?.updatedAt || "";
@@ -805,6 +807,7 @@ function resetSidepanelWorkspace() {
     state.claimAnalysisStale = false;
     state.claimAnalysisKnowledgeCount = 0;
     state.claimAnalysisUpdatedAt = "";
+    state.claimStickyFindingIndex = 0;
     $("#claimStickyToggle")?.setAttribute("aria-expanded", "false");
     if ($("#claimStickyBody")) $("#claimStickyBody").hidden = true;
     renderClaimSticky();
@@ -2273,6 +2276,9 @@ BATASAN:
 - summary pada setiap temuan berupa satu kalimat lengkap yang menjelaskan risiko temuan tersebut.
 - Jika data tidak ditemukan di RESUME, tulis sebagai bukti belum ditemukan, bukan mengarang.
 - Jika data ada di RESUME, jangan menyebut kosong.
+- Saran harus langsung menyebut bagian resume dan contoh informasi yang perlu dilengkapi, misalnya: "Verifikasi klinis pasien. Bila sesuai, pada S tambahkan riwayat perdarahan; pada O tambahkan konjungtiva pucat dan takikardi."
+- Contoh kelengkapan harus berasal dari data pasien yang tersedia. Jangan mengarang temuan atau menyuruh dokter menyalin contoh yang tidak sesuai klinis.
+- Jika dokumentasi saat ini menyatakan temuan negatif tetapi data lain tampak bertentangan, minta verifikasi klinis ulang. Jangan menyuruh mengubah temuan negatif menjadi positif tanpa konfirmasi dokter.
 - Jawaban wajib JSON valid saja, tanpa markdown, tanpa teks pembuka/penutup.
 
 FORMAT JSON WAJIB:
@@ -2285,7 +2291,7 @@ FORMAT JSON WAJIB:
       "summary": "Satu kalimat lengkap yang menjelaskan risiko temuan.",
       "evidence_found": ["Bukti yang ditemukan dari resume"],
       "missing_evidence": ["Bukti yang belum ditemukan"],
-      "suggestion": "Saran kelengkapan resume, bukan manipulasi klaim.",
+      "suggestion": "Verifikasi klinis pasien. Bila sesuai, pada S tambahkan ...; pada O tambahkan ...",
       "severity": "critical|warning|info"
     }
   ],
@@ -2391,6 +2397,7 @@ function createClaimFindingButton(finding, index) {
 
 function renderClaimAnalysis(rawAnalysis, result = $("#claimAnalysisResult")) {
   const analysis = normalizeClaimAnalysis(rawAnalysis);
+  if (state.claimAnalysisRaw !== rawAnalysis) state.claimStickyFindingIndex = 0;
   state.claimAnalysisRaw = rawAnalysis;
   if (result) {
     result.hidden = false;
@@ -2523,26 +2530,30 @@ function renderClaimSticky() {
 
   const findingsList = $("#claimStickyFindings");
   findingsList.textContent = "";
-  findings.forEach((finding, index) => {
-    const li = document.createElement("li");
+  state.claimStickyFindingIndex = Math.min(state.claimStickyFindingIndex, Math.max(0, findings.length - 1));
+  const activeFinding = findings[state.claimStickyFindingIndex];
+  if (activeFinding) {
     const button = document.createElement("button");
+    const number = document.createElement("span");
+    const title = document.createElement("span");
     button.className = "claim-sticky-item";
     button.type = "button";
-    button.dataset.claimFinding = String(index);
-    button.textContent = finding.title;
-    li.append(button);
-    findingsList.append(li);
-  });
+    button.dataset.claimFinding = String(state.claimStickyFindingIndex);
+    number.className = "claim-sticky-item-number";
+    number.textContent = String(state.claimStickyFindingIndex + 1) + ".";
+    title.textContent = activeFinding.title;
+    button.append(number, title);
+    findingsList.append(button);
+  }
 
-  const recommendations = $("#claimStickyRecommendations");
-  const recommendationWrap = $("#claimStickyRecommendationsWrap");
-  recommendations.textContent = "";
-  analysis.recommendations.slice(0, 3).forEach((item) => {
-    const li = document.createElement("li");
-    li.textContent = item;
-    recommendations.append(li);
-  });
-  recommendationWrap.hidden = !recommendations.childElementCount;
+  const pager = $("#claimStickyPager");
+  pager.hidden = findings.length < 2;
+  $("#claimStickyCounter").textContent = findings.length
+    ? state.claimStickyFindingIndex + 1 + "/" + findings.length
+    : "0/0";
+  $("#claimStickyPrevious").disabled = state.claimStickyFindingIndex === 0;
+  $("#claimStickyNext").disabled = state.claimStickyFindingIndex >= findings.length - 1;
+
 }
 
 function markClaimAnalysisStale() {
@@ -5222,6 +5233,16 @@ $("#claimStickyReanalyze")?.addEventListener("click", () => {
   void showCpptReviewModal(collectCpptReviewData());
   setCpptReviewTab("analysis");
   $("#cpptReviewKnowledge").click();
+});
+
+$("#claimStickyPrevious")?.addEventListener("click", () => {
+  state.claimStickyFindingIndex = Math.max(0, state.claimStickyFindingIndex - 1);
+  renderClaimSticky();
+});
+
+$("#claimStickyNext")?.addEventListener("click", () => {
+  state.claimStickyFindingIndex += 1;
+  renderClaimSticky();
 });
 
 document.addEventListener("click", (event) => {

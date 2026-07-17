@@ -29,12 +29,16 @@
           <span class="claim-sticky-chevron" aria-hidden="true">&#8964;</span>
         </button>
         <div id="claimStickyBody" class="claim-sticky-body" hidden>
-          <div class="claim-sticky-section-title">Perlu diperiksa</div>
-          <ol id="claimStickyFindings" class="claim-sticky-list"></ol>
-          <div id="claimStickyRecommendationsWrap">
-            <div class="claim-sticky-section-title">Saran kelengkapan</div>
-            <ol id="claimStickyRecommendations" class="claim-sticky-list"></ol>
+          <div class="claim-sticky-section-header">
+            <div class="claim-sticky-section-title">Perlu diperiksa</div>
+            <div id="claimStickyPager" class="claim-sticky-pager" hidden>
+              <button id="claimStickyPrevious" type="button" aria-label="Temuan sebelumnya" title="Temuan sebelumnya">&#8249;</button>
+              <span id="claimStickyCounter">1/1</span>
+              <button id="claimStickyNext" type="button" aria-label="Temuan berikutnya" title="Temuan berikutnya">&#8250;</button>
+            </div>
           </div>
+          <div id="claimStickyFindings" class="claim-sticky-findings"></div>
+
           <button id="claimStickyReanalyze" class="btn btn-outline btn-small" type="button">&#129504; Analisa Ulang</button>
         </div>
       </aside>
