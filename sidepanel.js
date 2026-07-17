@@ -565,24 +565,34 @@ function showCpptDiagnosisStatus(className, message, duration = 3500) {
   }
 }
 
+function getCpptDiagnosisRawContext(text) {
+  const value = normalizeErmText(text || "");
+  const edgeLength = 7000;
+  if (value.length <= edgeLength * 2) return { lengkap: value };
+  return {
+    awal: value.slice(0, edgeLength).trim(),
+    akhir: value.slice(-edgeLength).trim(),
+    catatan: `CPPT ${value.length} karakter; dikirim bagian awal dan akhir agar diagnosis tidak bias ke satu sisi.`,
+  };
+}
+
 function collectCpptDiagnosisContext() {
-  const results = collectCpptResultFields();
+  const { dx_utama, dx_sekunder, ...clinicalResults } = collectCpptResultFields();
   return {
     periode_rawat: state.cpptSummary?.periodText || "",
     soap: {
       subjektif: normalizeErmText($("#soSubjektif")?.value || ""),
       objektif: normalizeErmText($("#soObjektif")?.value || ""),
-      assessment: normalizeErmText($("#soAssessment")?.value || ""),
       planning: normalizeErmText($("#soPlanning")?.value || ""),
       konsultasi: normalizeErmText($("#soKonsultasi")?.value || ""),
       vitals: state.soapVitals,
     },
     cppt: {
-      raw: truncateText(state.cpptText, 7000),
-      hasil_resume: results,
+      raw: getCpptDiagnosisRawContext(state.cpptText),
+      hasil_resume_non_diagnosis: clinicalResults,
     },
     penunjang: {
-      dari_cppt: normalizeErmText(state.cpptPenunjang || results.penunjang || ""),
+      dari_cppt: normalizeErmText(state.cpptPenunjang || clinicalResults.penunjang || ""),
       ringkasan_pdf: normalizeErmText($("#penunjangSummary")?.value || ""),
     },
   };
@@ -592,7 +602,8 @@ function getMissingCpptDiagnosisContext(context) {
   const hasSoap = Object.entries(context.soap || {})
     .filter(([key]) => key !== "vitals")
     .some(([, value]) => isMeaningfulText(value));
-  const hasCppt = isMeaningfulText(context.cppt?.raw) || Object.values(context.cppt?.hasil_resume || {}).some(isMeaningfulText);
+  const hasCpptRaw = Object.values(context.cppt?.raw || {}).some(isMeaningfulText);
+  const hasCppt = hasCpptRaw || Object.values(context.cppt?.hasil_resume_non_diagnosis || {}).some(isMeaningfulText);
   const hasPenunjang = [context.penunjang?.dari_cppt, context.penunjang?.ringkasan_pdf].some(isMeaningfulText);
   return [!hasSoap && "SOAP", !hasCppt && "CPPT", !hasPenunjang && "Penunjang/Lab"].filter(Boolean);
 }
@@ -611,7 +622,14 @@ function formatCpptDiagnosisPrompt(context) {
 
 ATURAN:
 - Output adalah bantuan AI, bukan diagnosis final.
-- Jangan tulis dasar temuan/alasan.
+- Abaikan diagnosis yang sudah tertulis di field resume/hasil olahan.
+- Abaikan assessment SOAP.
+- Simpulkan diagnosis hanya dari data klinis, perjalanan CPPT awal-akhir, terapi/tindakan, dan pemeriksaan penunjang.
+- Gunakan istilah diagnosis yang lazim dipakai klinisi di Indonesia dan tetap selaras ICD, misalnya anemia gravis, syok sepsis, CKD stage V, diabetic foot Wagner IV, CAP/HAP, CHF, ACS.
+- Untuk diagnosis berbasis data objektif yang sangat menentukan, tambahkan bukti inti dalam tanda kurung, misalnya: Anemia gravis (Hb 3,1 g/dL), Hipokalemia berat (K 2,4 mmol/L), AKI stage 3 (Cr 4,2 mg/dL, oliguria).
+- Jika skor/klasifikasi klinis relevan dan semua komponen penting tersedia jelas, hitung dan tulis ringkas, misalnya: Pneumonia PSI skor 81, Apendisitis akut Alvarado skor 7, Thyroid storm BWPS 50, Diabetic foot Wagner IV.
+- Jangan tulis skor bila komponen data tidak cukup. Jangan mengarang usia, jenis kelamin, tanda vital, lab, komorbid, atau komponen skor yang tidak tersedia.
+- Jangan tulis dasar temuan/alasan terpisah; bukti inti boleh melekat singkat di nama diagnosis dengan tanda kurung.
 - Diagnosis utama maksimal 1 diagnosis, atau 2 bila sangat terkait.
 - Diagnosis sekunder maksimal 3-6 diagnosis inti, dipisahkan koma.
 - Jangan mengarang diagnosis bila data tidak mendukung.
