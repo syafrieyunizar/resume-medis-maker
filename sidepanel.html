@@ -23,6 +23,21 @@
         <button class="tab" data-tab="cppt" role="tab">CPPT</button>
         <button class="tab" data-tab="tindak-lanjut" role="tab">Penunjang</button>
       </nav>
+      <aside id="claimSticky" class="claim-sticky" hidden aria-live="polite">
+        <button id="claimStickyToggle" class="claim-sticky-toggle" type="button" aria-expanded="false">
+          <span id="claimStickyLabel">Risiko pending -</span>
+          <span class="claim-sticky-chevron" aria-hidden="true">&#8964;</span>
+        </button>
+        <div id="claimStickyBody" class="claim-sticky-body" hidden>
+          <div class="claim-sticky-section-title">Perlu diperiksa</div>
+          <ol id="claimStickyFindings" class="claim-sticky-list"></ol>
+          <div id="claimStickyRecommendationsWrap">
+            <div class="claim-sticky-section-title">Saran kelengkapan</div>
+            <ol id="claimStickyRecommendations" class="claim-sticky-list"></ol>
+          </div>
+          <button id="claimStickyReanalyze" class="btn btn-outline btn-small" type="button">&#129504; Analisa Ulang</button>
+        </div>
+      </aside>
     </header>
 
     <main class="content">
@@ -508,6 +523,57 @@
           <button id="ocrModalCancel" class="btn btn-outline btn-small" type="button">Batal</button>
           <button id="ocrModalDelete" class="btn btn-outline btn-small" type="button">Hapus File</button>
         </div>
+      </div>
+    </div>
+    <div id="cpptReviewModal" class="full-panel-modal cppt-review-modal" hidden role="dialog" aria-modal="true" aria-labelledby="cpptReviewTitle">
+      <div class="full-panel-dialog cppt-review-dialog">
+        <div>
+          <h2 id="cpptReviewTitle" class="section-title">Periksa sebelum memasukkan</h2>
+          <p class="cppt-review-caution"><strong>AI dapat keliru.</strong> Cocokkan kembali diagnosis, terapi, tindakan, dan hasil penunjang dengan rekam medis pasien.</p>
+        </div>
+
+        <div class="cppt-review-tabs" role="tablist" aria-label="Review resume medis">
+          <button class="cppt-review-tab is-active" type="button" role="tab" aria-selected="true" data-review-tab="preview">Preview</button>
+          <button class="cppt-review-tab" type="button" role="tab" aria-selected="false" data-review-tab="analysis">Analisa</button>
+        </div>
+
+        <section id="cpptReviewPreviewPanel" class="cppt-review-panel" data-review-panel="preview">
+          <div id="cpptReviewWarnings" class="cppt-review-warnings" aria-live="polite"></div>
+          <div id="cpptReviewPreview" class="cppt-review-preview"></div>
+        </section>
+
+        <section id="cpptReviewAnalysisPanel" class="cppt-review-panel" data-review-panel="analysis" hidden>
+          <div id="cpptReviewKnowledgeIntro" class="cppt-review-knowledge-intro">
+            <button id="cpptReviewKnowledge" class="btn btn-outline" type="button">&#129504; Analisa Kelayakan Resume</button>
+            <p>Analisa resume medis menggunakan AI berdasarkan knowledge peraturan BPJS yang tersedia.</p>
+          </div>
+          <div id="cpptReviewKnowledgeProgress" class="progress-panel" hidden>
+            <div class="progress-track">
+              <div id="cpptReviewKnowledgeProgressBar" class="progress-fill"></div>
+            </div>
+            <div id="cpptReviewKnowledgeProgressText" class="progress-text">Menyiapkan analisa...</div>
+          </div>
+          <div id="cpptReviewKnowledgeStatus" class="status" hidden></div>
+          <div id="cpptReviewKnowledgeResult" class="claim-review-result" hidden></div>
+        </section>
+
+        <div class="action-row cppt-review-actions">
+          <button id="cpptReviewConfirm" class="btn btn-primary" type="button" disabled>Masukkan (10)</button>
+          <button id="cpptReviewCancel" class="btn btn-outline" type="button">Cek Ulang</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="claimFindingDetailModal" class="full-panel-modal claim-detail-modal" hidden role="dialog" aria-modal="true" aria-labelledby="claimFindingDetailTitle">
+      <div class="full-panel-dialog claim-detail-dialog">
+        <button id="claimFindingDetailBack" class="claim-detail-back" type="button" aria-label="Kembali ke hasil analisa">&larr; Kembali</button>
+        <div>
+          <h2 id="claimFindingDetailTitle" class="claim-detail-title">Detail temuan</h2>
+          <p id="claimFindingDetailSummary" class="claim-detail-summary"></p>
+        </div>
+        <div id="claimFindingEvidenceFound" class="claim-detail-section"></div>
+        <div id="claimFindingEvidenceMissing" class="claim-detail-section"></div>
+        <div id="claimFindingSuggestion" class="claim-detail-section"></div>
       </div>
     </div>
     <div id="decisionModal" class="full-panel-modal" hidden role="dialog" aria-modal="true" aria-labelledby="decisionModalTitle">

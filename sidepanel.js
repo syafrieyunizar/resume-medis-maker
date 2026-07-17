@@ -10,6 +10,9 @@ const state = {
   cpptSources: [],
   penunjangFiles: [],
   claimAnalysisRaw: null,
+  claimAnalysisStale: false,
+  claimAnalysisKnowledgeCount: 0,
+  claimAnalysisUpdatedAt: "",
   soapVitals: {},
   draftKey: "",
   draftPatientId: "",
@@ -45,6 +48,7 @@ function activatePanel(target) {
     panel.hidden = !active;
   });
   queueAutoGrowTextareas();
+  renderClaimSticky();
   scheduleDraftSave();
 }
 
@@ -675,6 +679,9 @@ function collectDraftData() {
     },
     claim: {
       raw: state.claimAnalysisRaw,
+      stale: state.claimAnalysisStale,
+      knowledgeCount: state.claimAnalysisKnowledgeCount,
+      updatedAt: state.claimAnalysisUpdatedAt,
     },
   };
 }
@@ -744,9 +751,12 @@ function applyDraftData(data = {}) {
       state.penunjangFiles = Array.isArray(data.penunjang.files) ? data.penunjang.files : [];
       updatePenunjangList();
     }
-    if (data.claim?.raw) {
-      renderClaimAnalysis(data.claim.raw);
-    }
+    state.claimAnalysisRaw = data.claim?.raw || null;
+    state.claimAnalysisStale = Boolean(data.claim?.stale);
+    state.claimAnalysisKnowledgeCount = Number(data.claim?.knowledgeCount || 0);
+    state.claimAnalysisUpdatedAt = data.claim?.updatedAt || "";
+    if (state.claimAnalysisRaw) renderClaimAnalysis(state.claimAnalysisRaw);
+    else renderClaimSticky();
     if (data.activePanel) {
       activatePanel(data.activePanel);
     }
@@ -792,6 +802,13 @@ function resetSidepanelWorkspace() {
     $("#penunjangSummary").value = "";
     updatePenunjangList();
     state.claimAnalysisRaw = null;
+    state.claimAnalysisStale = false;
+    state.claimAnalysisKnowledgeCount = 0;
+    state.claimAnalysisUpdatedAt = "";
+    $("#claimStickyToggle")?.setAttribute("aria-expanded", "false");
+    if ($("#claimStickyBody")) $("#claimStickyBody").hidden = true;
+    renderClaimSticky();
+    $("#claimFindingDetailModal").hidden = true;
     const claimResult = $("#claimAnalysisResult");
     if (claimResult) {
       claimResult.hidden = true;
@@ -2126,6 +2143,26 @@ function collectResumeForClaimAnalysis() {
   };
 }
 
+function redactClaimContext(value) {
+  if (Array.isArray(value)) return value.map(redactClaimContext);
+  if (value && typeof value === "object") {
+    return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, redactClaimContext(item)]));
+  }
+
+  let text = normalizeErmText(value);
+  const patientName = String(state.draftPatientName || "").trim();
+  if (patientName) {
+    const escapedName = patientName.replace(/[.*+?^$()|[\]\\{}-]/g, "\\$&");
+    text = text.replace(new RegExp(escapedName, "gi"), "[NAMA PASIEN]");
+  }
+  return sanitizeCpptForAi(text)
+    .replace(
+      /((?:nama(?: pasien)?|nik|no\.?\s*(?:rm|rekam medis|sep)|alamat|tgl\.?\s*lahir|tanggal lahir)\s*[:=]\s*)[^,\n;]+/gi,
+      "$1[DIANONIMKAN]"
+    )
+    .replace(/\b\d{10,16}\b/g, "[ID]");
+}
+
 function extractClaimKeywords(resume) {
   const text = JSON.stringify(resume).toLowerCase();
   const medicalTerms = [
@@ -2149,6 +2186,9 @@ function extractClaimKeywords(resume) {
     "kultur",
     "syok",
     "perdarahan",
+    "adhf",
+    "gagal jantung",
+    "heart failure",
     "chf",
     "cad",
   ];
@@ -2224,6 +2264,13 @@ BATASAN:
 - Jangan menyarankan tindakan medis baru demi klaim.
 - Fokus pada gap dokumentasi: diagnosis, bukti klinis, penunjang, terapi, monitoring, tindakan, dan konsistensi resume.
 - Gunakan knowledge yang diberikan sebagai dasar.
+- Cocokkan diagnosis dengan bukti klinis, penunjang, skor, terapi, atau monitoring hanya bila knowledge menyebutkannya.
+- Contoh pola temuan: diagnosis ADHF tertulis tetapi Echo/LVEF belum ditemukan, bila knowledge relevan memang mensyaratkannya.
+- Jangan menyatakan diagnosis atau tindakan dokter salah secara definitif; tulis sebagai hal yang perlu diverifikasi.
+- Maksimal 4 temuan utama dan prioritaskan yang paling berdampak.
+- title setiap temuan harus ringkas, 3-10 kata, dan menyebut diagnosis atau gap utama.
+- summary utama dan recommendations harus ringkas, jelas, dan tidak mengulang isi yang sama.
+- summary pada setiap temuan berupa satu kalimat lengkap yang menjelaskan risiko temuan tersebut.
 - Jika data tidak ditemukan di RESUME, tulis sebagai bukti belum ditemukan, bukan mengarang.
 - Jika data ada di RESUME, jangan menyebut kosong.
 - Jawaban wajib JSON valid saja, tanpa markdown, tanpa teks pembuka/penutup.
@@ -2235,6 +2282,7 @@ FORMAT JSON WAJIB:
   "critical_findings": [
     {
       "title": "Judul temuan",
+      "summary": "Satu kalimat lengkap yang menjelaskan risiko temuan.",
       "evidence_found": ["Bukti yang ditemukan dari resume"],
       "missing_evidence": ["Bukti yang belum ditemukan"],
       "suggestion": "Saran kelengkapan resume, bukan manipulasi klaim.",
@@ -2305,6 +2353,7 @@ function normalizeClaimAnalysis(data) {
     summary: String(data?.summary || "").trim(),
     critical_findings: findings.map((item) => ({
       title: String(item?.title || "Temuan").trim(),
+      summary: String(item?.summary || "").trim(),
       evidence_found: normalizeArray(item?.evidence_found),
       missing_evidence: normalizeArray(item?.missing_evidence),
       suggestion: String(item?.suggestion || "").trim(),
@@ -2316,73 +2365,238 @@ function normalizeClaimAnalysis(data) {
   };
 }
 
-function appendList(parent, title, items, extraClass = "") {
+function getClaimRiskClass(risk) {
+  if (risk === "Tinggi") return "is-high";
+  if (risk === "Rendah") return "is-low";
+  return "is-medium";
+}
+
+function createClaimFindingButton(finding, index) {
+  const button = document.createElement("button");
+  const number = document.createElement("span");
+  const title = document.createElement("span");
+  const arrow = document.createElement("span");
+  button.className = "claim-finding-card";
+  button.type = "button";
+  button.dataset.claimFinding = String(index);
+  number.className = "claim-finding-number";
+  number.textContent = String(index + 1);
+  title.textContent = finding.title;
+  arrow.className = "claim-finding-arrow";
+  arrow.textContent = "›";
+  arrow.setAttribute("aria-hidden", "true");
+  button.append(number, title, arrow);
+  return button;
+}
+
+function renderClaimAnalysis(rawAnalysis, result = $("#claimAnalysisResult")) {
+  const analysis = normalizeClaimAnalysis(rawAnalysis);
+  state.claimAnalysisRaw = rawAnalysis;
+  if (result) {
+    result.hidden = false;
+    result.className = "claim-review-result " + getClaimRiskClass(analysis.risk);
+    result.textContent = "";
+
+    const risk = document.createElement("div");
+    const riskTitle = document.createElement("div");
+    const summary = document.createElement("p");
+    risk.className = "claim-review-risk";
+    riskTitle.className = "claim-review-risk-title";
+    riskTitle.textContent = "Risiko pending: " + analysis.risk;
+    summary.className = "claim-review-summary";
+    summary.textContent = analysis.summary || "Tinjau temuan berikut sebelum memasukkan resume.";
+    risk.append(riskTitle, summary);
+    result.append(risk);
+
+    const findingsWrap = document.createElement("div");
+    const findingsHeading = document.createElement("div");
+    const findingsList = document.createElement("div");
+    findingsHeading.className = "claim-review-heading";
+    findingsHeading.textContent = "Risiko pending karena";
+    findingsList.className = "claim-finding-list";
+    if (analysis.critical_findings.length) {
+      analysis.critical_findings.slice(0, 4).forEach((finding, index) => {
+        findingsList.append(createClaimFindingButton(finding, index));
+      });
+    } else {
+      const empty = document.createElement("p");
+      empty.className = "claim-review-summary";
+      empty.textContent = "Tidak ada temuan utama dari knowledge yang digunakan.";
+      findingsList.append(empty);
+    }
+    findingsWrap.append(findingsHeading, findingsList);
+    result.append(findingsWrap);
+
+    if (analysis.recommendations.length) {
+      const recommendationsWrap = document.createElement("div");
+      const recommendationsHeading = document.createElement("div");
+      const recommendations = document.createElement("ol");
+      recommendationsHeading.className = "claim-review-heading";
+      recommendationsHeading.textContent = "Saran kelengkapan resume";
+      recommendations.className = "claim-review-recommendations";
+      analysis.recommendations.slice(0, 4).forEach((item) => {
+        const li = document.createElement("li");
+        li.textContent = item;
+        recommendations.append(li);
+      });
+      recommendationsWrap.append(recommendationsHeading, recommendations);
+      result.append(recommendationsWrap);
+    }
+  }
+  renderClaimSticky();
+  scheduleDraftSave();
+}
+
+function fillClaimDetailSection(container, title, items) {
+  container.textContent = "";
+  container.hidden = !items.length;
   if (!items.length) return;
-  const section = document.createElement("div");
-  section.className = "claim-section" + (extraClass ? " " + extraClass : "");
-  const heading = document.createElement("div");
-  heading.className = "claim-section-title";
-  heading.textContent = title;
+  const heading = document.createElement("h3");
   const list = document.createElement("ul");
-  list.className = "claim-list";
+  heading.textContent = title;
   items.forEach((item) => {
     const li = document.createElement("li");
     li.textContent = item;
     list.append(li);
   });
-  section.append(heading, list);
-  parent.append(section);
+  container.append(heading, list);
 }
 
-function renderClaimAnalysis(rawAnalysis) {
-  const result = $("#claimAnalysisResult");
-  const analysis = normalizeClaimAnalysis(rawAnalysis);
-  state.claimAnalysisRaw = rawAnalysis;
-  result.hidden = false;
-  result.className = "claim-result";
-  result.textContent = "";
+let claimDetailReturnFocus = null;
 
-  const riskCard = document.createElement("div");
-  const riskClass = analysis.risk === "Tinggi" ? "is-high" : analysis.risk === "Sedang" ? "is-medium" : "is-low";
-  riskCard.className = `claim-card claim-risk ${riskClass}`;
-  const riskTitle = document.createElement("div");
-  riskTitle.className = "claim-card-title";
-  riskTitle.textContent = `Risiko pending: ${analysis.risk}`;
-  const summary = document.createElement("p");
-  summary.className = "claim-summary";
-  summary.textContent = analysis.summary || "Tidak ada ringkasan.";
-  riskCard.append(riskTitle, summary);
-  result.append(riskCard);
+function openClaimFindingDetail(index, trigger = null) {
+  const analysis = normalizeClaimAnalysis(state.claimAnalysisRaw);
+  const finding = analysis.critical_findings[index];
+  if (!finding) return;
+  claimDetailReturnFocus = trigger;
 
-  if (analysis.critical_findings.length) {
-    const wrap = document.createElement("div");
-    wrap.className = "claim-section";
-    const heading = document.createElement("div");
-    heading.className = "claim-section-title";
-    heading.textContent = "Temuan Utama";
-    wrap.append(heading);
-    analysis.critical_findings.forEach((finding) => {
-      const card = document.createElement("div");
-      card.className = "claim-card";
-      const badge = document.createElement("span");
-      badge.className = `claim-badge is-${finding.severity}`;
-      badge.textContent = finding.severity;
-      const title = document.createElement("div");
-      title.className = "claim-card-title";
-      title.textContent = finding.title;
-      card.append(badge, title);
-      appendList(card, "Bukti ditemukan", finding.evidence_found);
-      appendList(card, "Bukti belum ditemukan", finding.missing_evidence);
-      if (finding.suggestion) appendList(card, "Saran", [finding.suggestion], "claim-recommendations");
-      wrap.append(card);
-    });
-    result.append(wrap);
+  const show = () => {
+    $("#claimFindingDetailTitle").textContent = finding.title;
+    $("#claimFindingDetailSummary").textContent =
+      finding.summary || analysis.summary || "Periksa kesesuaian temuan ini dengan rekam medis pasien.";
+    fillClaimDetailSection($("#claimFindingEvidenceFound"), "Bukti ditemukan", finding.evidence_found);
+    fillClaimDetailSection($("#claimFindingEvidenceMissing"), "Bukti belum ditemukan", finding.missing_evidence);
+    fillClaimDetailSection(
+      $("#claimFindingSuggestion"),
+      "Saran kelengkapan resume",
+      finding.suggestion ? [finding.suggestion] : []
+    );
+    $("#claimFindingDetailModal").hidden = false;
+    $("#claimFindingDetailBack").focus();
+    trigger?.classList.remove("is-flipping");
+  };
+
+  if (trigger) {
+    trigger.classList.add("is-flipping");
+    setTimeout(show, 160);
+  } else {
+    show();
+  }
+}
+
+function closeClaimFindingDetail() {
+  $("#claimFindingDetailModal").hidden = true;
+  claimDetailReturnFocus?.focus();
+  claimDetailReturnFocus = null;
+}
+
+function renderClaimSticky() {
+  const sticky = $("#claimSticky");
+  if (!sticky) return;
+  const activePanel = document.querySelector(".panel.is-active")?.dataset.panel || "";
+  const clinicalPanel = ["so", "cppt", "tindak-lanjut"].includes(activePanel);
+  if (!state.claimAnalysisRaw || !clinicalPanel || document.body.classList.contains("is-admin-mode")) {
+    sticky.hidden = true;
+    return;
   }
 
-  appendList(result, "Bukti Ditemukan", analysis.found_evidence);
-  appendList(result, "Bukti Belum Ditemukan", analysis.missing_evidence);
-  appendList(result, "Saran Kelengkapan Resume", analysis.recommendations, "claim-card claim-recommendations");
+  const analysis = normalizeClaimAnalysis(state.claimAnalysisRaw);
+  const findings = analysis.critical_findings.slice(0, 4);
+  const expanded = $("#claimStickyToggle").getAttribute("aria-expanded") === "true";
+  const riskClass = state.claimAnalysisStale ? "is-stale" : getClaimRiskClass(analysis.risk);
+  sticky.hidden = false;
+  sticky.className = "claim-sticky " + riskClass;
+  $("#claimStickyLabel").textContent = state.claimAnalysisStale
+    ? "Data resume berubah • analisa perlu diperbarui"
+    : "Risiko pending " + analysis.risk.toLowerCase() + " • " + findings.length + " temuan";
+  $("#claimStickyBody").hidden = !expanded;
+
+  const findingsList = $("#claimStickyFindings");
+  findingsList.textContent = "";
+  findings.forEach((finding, index) => {
+    const li = document.createElement("li");
+    const button = document.createElement("button");
+    button.className = "claim-sticky-item";
+    button.type = "button";
+    button.dataset.claimFinding = String(index);
+    button.textContent = finding.title;
+    li.append(button);
+    findingsList.append(li);
+  });
+
+  const recommendations = $("#claimStickyRecommendations");
+  const recommendationWrap = $("#claimStickyRecommendationsWrap");
+  recommendations.textContent = "";
+  analysis.recommendations.slice(0, 3).forEach((item) => {
+    const li = document.createElement("li");
+    li.textContent = item;
+    recommendations.append(li);
+  });
+  recommendationWrap.hidden = !recommendations.childElementCount;
+}
+
+function markClaimAnalysisStale() {
+  if (!state.claimAnalysisRaw || state.claimAnalysisStale || state.draftRestoring) return;
+  state.claimAnalysisStale = true;
+  renderClaimSticky();
   scheduleDraftSave();
+}
+async function analyzeResumeWithKnowledge(progressCtl) {
+  await progressCtl.setProgress("Membaca form extension...", 8);
+  const resume = redactClaimContext(collectResumeForClaimAnalysis());
+  await progressCtl.setProgress("Memeriksa SOAP dan rangkuman CPPT...", 32);
+  await progressCtl.setProgress("Memeriksa penunjang...", 52);
+  const keywords = extractClaimKeywords(resume);
+  await progressCtl.setProgress("Mencari Knowledge BPJS relevan...", 66);
+  const knowledge = await knowledgeApi("search", { keywords });
+  const chunks = (knowledge.chunks || []).slice(0, 8);
+  if (!chunks.length) throw new Error("Knowledge BPJS relevan tidak ditemukan untuk data ini.");
+
+  let compactResume = compactResumeForClaim(resume, false);
+  let compactChunks = compactKnowledgeChunks(chunks, false);
+  let prompt = formatClaimAnalysisPrompt(compactResume, compactChunks);
+  if (prompt.length > 14000) {
+    compactResume = compactResumeForClaim(resume, true);
+    compactChunks = compactKnowledgeChunks(chunks.slice(0, 5), true);
+    prompt = formatClaimAnalysisPrompt(compactResume, compactChunks);
+  }
+
+  await progressCtl.setProgress("Menganalisa dengan " + compactChunks.length + " knowledge relevan...", 78);
+  const ai = await getEffectiveAiSettings();
+  progressCtl.startWaiting("Analisa Knowledge BPJS");
+  let analysis = "";
+  try {
+    analysis =
+      ai.source === "admin"
+        ? await callAdminAiText({ prompt, responseJson: true, userSession: ai.adminUserSession })
+        : await callProviderText({
+            provider: ai.provider,
+            apiKey: ai.apiKey,
+            model: ai.model,
+            prompt,
+            baseUrl: ai.baseUrl,
+            providerLabel: ai.providerLabel,
+          });
+  } finally {
+    progressCtl.stop();
+  }
+  if (!analysis.trim()) throw new Error("Respons analisa kosong dari provider");
+
+  await progressCtl.setProgress("Menyusun hasil analisa...", 96);
+  return {
+    parsed: parseJsonResponse(analysis),
+    knowledgeCount: compactChunks.length,
+  };
 }
 
 function parseFlexibleDate(value) {
@@ -3988,6 +4202,11 @@ aksesBtn.addEventListener("click", async () => {
   }
 });
 
+function sanitizeCpptForAi(text) {
+  return normalizeErmText(text || "")
+    .replace(/\bdr\.?\s+[^\n,;]*(Sp\.?\s*[A-Za-z.() -]+)/gi, (_, specialty) => `dr. [NAMA], ${normalizeLine(specialty).replace(/\s+/g, "")}`)
+    .replace(/\bdr\.?\s+[A-Z][A-Za-z.'-]+(?:\s+[A-Z][A-Za-z.'-]+){0,3}/g, "dr. [NAMA]");
+}
 // ---------------- CPPT: Extract via Gemini ----------------
 extractBtn.addEventListener("click", async () => {
   if (!state.cpptText) {
@@ -4015,21 +4234,29 @@ extractBtn.addEventListener("click", async () => {
     `Kamu adalah dokter DPJP yang membuat resume medis pasien dari data CPPT. 
 
 ATURAN PENULISAN (WAJIB):
-- Gaya bahasa: SANGAT RINGKAS, PADAT, TELEGRAFIS — seperti catatan medis dokter, bukan paragraf naratif.
+- Gaya bahasa: SANGAT RINGKAS, PADAT, TELEGRAFIS - seperti catatan medis dokter, bukan paragraf naratif.
 - JANGAN menjelaskan, JANGAN menarasikan, JANGAN gunakan kalimat lengkap dengan subjek-predikat seperti "pasien mendapatkan...", "dilakukan...", "menunjukkan...".
 - Pisahkan item dengan koma. Tanpa kata penghubung yang tidak perlu.
 - Gunakan singkatan medis baku (IV, PO, tpm, mg, mL, g/dL, U/L, mcg/kgBB/menit, dll).
 - Gunakan koma desimal Indonesia (mis. 0,1 bukan 0.1) dan titik ribuan (mis. 10.600).
-- Untuk nilai lab atau terapi yang berubah gunakan format ASCII nama nilai_awal->nilai_akhir satuan (mis. ureum 154->63 mg/dL). Jangan gunakan simbol panah Unicode.
+- Gunakan tanda -> untuk tren/perubahan dari nilai awal menjadi nilai akhir. Contoh: Hb 7,1->9,4 g/dL. Jangan gunakan simbol panah Unicode.
 - Sertakan satuan untuk semua nilai lab/dosis.
-- Ambil HANYA data yang bermakna/penting. Abaikan info redundant.
-- Field "Operasi/Tindakan" berarti tindakan, prosedur, atau intervensi bermakna selama perawatan, bukan hanya operasi.
-- Masukkan bila ada: operasi, tindakan invasif/non-bedah, pemasangan alat (NGT, DC/kateter, dll), transfusi, HD, oksigenasi, nebulisasi, suction, ventilator, EKG, EEG, Echo, endoskopi, atau tindakan/prosedur bermakna lain.
-- Jangan masukkan tindakan rutin umum seperti infus biasa, injeksi obat rutin, atau pemberian obat oral biasa kecuali benar-benar merupakan tindakan bermakna.
+- Abaikan info redundant dan catatan administratif non-klinis.
+
+ATURAN PER FIELD:
+- penunjang: tulis hasil lab/radiologi/ekg/echo yang abnormal, bermakna, atau menunjang diagnosis. Pakai format tren bila ada. Jangan masukkan hasil normal yang tidak relevan.
+- terapi_dirawat: tulis semua terapi/obat/tindakan terapeutik yang benar-benar diberikan selama rawat. Abaikan hanya catatan administratif, duplikasi berulang tanpa perubahan, atau instruksi non-terapi.
+- operasi: tulis semua tindakan/prosedur/intervensi yang berpotensi terkait kode ICD-9-CM, termasuk operasi, tindakan invasif/non-bedah, pemasangan alat (NGT, DC/kateter, dll), transfusi, HD, oksigenasi, nebulisasi, suction, ventilator, EKG, EEG, Echo, endoskopi, atau prosedur bermakna lain. Jangan campur obat murni di field ini.
+- dx_utama: satu diagnosis utama paling relevan, maksimal dua bila satu rangkaian klinis kuat. Hindari gejala sebagai diagnosis utama bila etiologi jelas.
+- dx_sekunder: diagnosis komorbid/komplikasi bermakna, dipisah koma. Jangan masukkan keluhan ringan atau semua abnormal lab sebagai diagnosis.
+- konsul: jangan tulis nama dokter/konsulen. Tulis hanya spesialis/bagian/gelar bila terdeteksi, misalnya Konsultasi Sp.PD, Konsultasi Sp.KFR, Konsultasi Sp.JP. Jika hanya nama dokter terbaca tanpa spesialis, tulis Konsultasi bidang lain.
+- terapi_pulang: obat pulang, kontrol, dan rencana lanjut. Jangan campur terapi selama rawat. Jika pasien meninggal, tulis keterangan meninggal dan jam meninggal bila tersedia, misalnya "Meninggal jam 14.35". Jika tidak ada, isi "-".
+- cppt_gaps: bahasa aman, bukan perintah; gunakan pola "Pertimbangkan dokumentasi ... bila sesuai klinis." Jangan menyarankan manipulasi klaim/diagnosis.
 
 CONTOH GAYA YANG BENAR:
-Penunjang: "Hb 7,1 g/dL, ureum 154->63 mg/dL, SGOT/SGPT 75/134 U/L, USG abdomen: hydrops GB, cholelithiasis, Echo: LVEF 55,64%, TR mild."
+Penunjang: "Hb 7,1->9,4 g/dL, ureum 154->63 mg/dL, SGOT/SGPT 75/134 U/L, USG abdomen: hydrops GB, cholelithiasis, Echo: LVEF 55,64%, TR mild."
 Terapi: "Sp. Vascon 0,1 mcg/kgBB/menit, infus NS 14 tpm, Lansoprazole inj 2x30 mg IV, Ceftazidime 2x1 g IV, transfusi PRC 3 kolf/12 jam."
+Konsul: "Konsultasi Sp.PD, Konsultasi Sp.KFR."
 
 CONTOH GAYA YANG SALAH (jangan tiru):
 "Pasien mendapatkan infus NS 14 tpm untuk hidrasi. Dilakukan transfusi PRC sebanyak 3 kolf..."
@@ -4086,7 +4313,7 @@ ATURAN KELENGKAPAN CPPT:
     );
     const userMsg =
       "Data CPPT:\n\n" +
-      state.cpptText +
+      sanitizeCpptForAi(state.cpptText) +
       "\n\n" +
       cpptGapPrompt +
       "\n\nKembalikan JSON object dengan key PERSIS berikut: penunjang, terapi_dirawat, operasi, dx_utama, dx_sekunder, konsul, terapi_pulang, cppt_gaps. Jangan gunakan key lain. Field operasi harus berisi tindakan/prosedur/intervensi bermakna termasuk NGT, DC, oksigenasi, nebulisasi, EKG, EEG, Echo, transfusi, HD, dan sejenisnya bila ada. Jangan masukkan tindakan rutin umum seperti infus biasa atau injeksi obat rutin. Jika tidak ada data, isi string dengan '-' dan cppt_gaps dengan array kosong.";
@@ -4176,6 +4403,7 @@ ATURAN KELENGKAPAN CPPT:
       toast("Hasil extract kosong", "error");
     } else {
       const filled = CPPT_CORE_KEYS.filter((key) => isMeaningfulText(normalized[key])).length;
+      markClaimAnalysisStale();
       scheduleDraftSave();
       progress.complete(`Selesai. ${filled}/7 field terisi dan dapat diedit di bawah.`);
       toast("Ekstraksi selesai", "success");
@@ -4769,6 +4997,7 @@ summarizePenunjangBtn.addEventListener("click", async () => {
 
     await progress.setProgress("Menyusun rangkuman penunjang...", 94);
     $("#penunjangSummary").value = formatPenunjangSummary(summary);
+    markClaimAnalysisStale();
     queueAutoGrowTextareas();
     scheduleDraftSave();
     progress.complete("Selesai. Rangkuman dapat diedit di field Pemeriksaan Penunjang Bermakna." + (pendingOcrFiles.length ? ` ${pendingOcrFiles.length} berkas gambar belum OCR dan tidak ikut dirangkum.` : ""));
@@ -4783,20 +5012,232 @@ summarizePenunjangBtn.addEventListener("click", async () => {
 });
 
 // ---------------- CPPT: Masukkan Detail ke halaman ----------------
-$("#insertCPPT").addEventListener("click", async () => {
-  if (!window.confirm("Apakah semua data sudah benar?")) return;
+const CPPT_REVIEW_FIELDS = [
+  ["penunjang", "Pemeriksaan Penunjang Bermakna", "an"],
+  ["terapi_dirawat", "Terapi Selama Dirawat", "af"],
+  ["operasi", "Operasi/Tindakan", "a"],
+  ["dx_utama", "Diagnosa Utama", "b"],
+  ["dx_sekunder", "Diagnosa Sekunder", "c"],
+  ["konsul", "Konsultasi Bidang Lain", "d"],
+  ["terapi_pulang", "Terapi Saat Pulang", "e"],
+];
+
+let cpptReviewResolve = null;
+let cpptReviewTimer = null;
+let cpptReviewKnowledgeRun = 0;
+let cpptReviewKnowledgeBusy = false;
+let cpptReviewSeconds = 10;
+let cpptReviewActiveTab = "preview";
+
+function collectCpptReviewData() {
+  return CPPT_REVIEW_FIELDS.map(([key, label, resumeName]) => ({
+    key,
+    label,
+    resumeName,
+    value: normalizeErmText(document.querySelector('#cpptResults textarea[data-key="' + key + '"]')?.value ?? "").trim(),
+  }));
+}
+
+function getCpptReviewWarnings(fields) {
+  const warnings = [];
+  const empty = fields.filter((field) => !field.value || field.value === "-");
+  const diagnoses = fields.filter((field) => field.key === "dx_utama" || field.key === "dx_sekunder");
+  const consultation = fields.find((field) => field.key === "konsul")?.value || "";
+  const pendingOcr = getPendingOcrFiles().length;
+
+  if (empty.length) warnings.push(empty.length + " field masih kosong atau berisi -");
+  if (diagnoses.some((field) => /\b(?:suspek|susp|mungkin|kemungkinan|ddx)\b|dd\/|\?/i.test(field.value))) {
+    warnings.push("Diagnosis mengandung istilah belum pasti");
+  }
+  if (/\bdr\.?\s+(?!\[nama\])/i.test(consultation)) warnings.push("Nama dokter mungkin masih tertulis");
+  if (pendingOcr) warnings.push(pendingOcr + " berkas penunjang belum diproses OCR");
+  return warnings;
+}
+
+function updateCpptReviewConfirm() {
+  const confirm = $("#cpptReviewConfirm");
+  if (cpptReviewSeconds > 0) {
+    confirm.disabled = true;
+    confirm.textContent = "Masukkan (" + cpptReviewSeconds + ")";
+    return;
+  }
+  confirm.disabled = cpptReviewKnowledgeBusy;
+  confirm.textContent = cpptReviewKnowledgeBusy ? "Menunggu Analisa..." : "Masukkan ke Resume";
+}
+
+function setCpptReviewTab(tabName) {
+  cpptReviewActiveTab = tabName === "analysis" ? "analysis" : "preview";
+  $$("[data-review-tab]").forEach((tab) => {
+    const active = tab.dataset.reviewTab === cpptReviewActiveTab;
+    tab.classList.toggle("is-active", active);
+    tab.setAttribute("aria-selected", String(active));
+  });
+  $$("[data-review-panel]").forEach((panel) => {
+    panel.hidden = panel.dataset.reviewPanel !== cpptReviewActiveTab;
+  });
+  updateCpptReviewConfirm();
+}
+
+function closeCpptReviewModal(value) {
+  cpptReviewKnowledgeRun += 1;
+  cpptReviewKnowledgeBusy = false;
+  clearInterval(cpptReviewTimer);
+  cpptReviewTimer = null;
+  $("#cpptReviewModal").hidden = true;
+  renderClaimSticky();
+  if (cpptReviewResolve) {
+    cpptReviewResolve(value);
+    cpptReviewResolve = null;
+  }
+}
+
+function showCpptReviewModal(fields) {
+  const warnings = getCpptReviewWarnings(fields);
+  const warningList = $("#cpptReviewWarnings");
+  const preview = $("#cpptReviewPreview");
+  const knowledgeButton = $("#cpptReviewKnowledge");
+  const knowledgeStatus = $("#cpptReviewKnowledgeStatus");
+  const knowledgeResult = $("#cpptReviewKnowledgeResult");
+
+  cpptReviewKnowledgeRun += 1;
+  cpptReviewKnowledgeBusy = false;
+  cpptReviewSeconds = 10;
+  setCpptReviewTab("preview");
+  knowledgeButton.disabled = false;
+  knowledgeButton.textContent = state.claimAnalysisRaw
+    ? "\u{1F9E0} Analisa Ulang Knowledge BPJS"
+    : "\u{1F9E0} Analisa Kelayakan Resume";
+  $("#cpptReviewKnowledgeProgress").hidden = true;
+  $("#cpptReviewKnowledgeProgressBar").style.width = "0%";
+  $("#cpptReviewKnowledgeProgressText").textContent = "Menyiapkan analisa...";
+  knowledgeStatus.hidden = !state.claimAnalysisRaw;
+  knowledgeStatus.className = state.claimAnalysisStale ? "status is-warning" : "status";
+  knowledgeStatus.textContent = state.claimAnalysisStale
+    ? "Data resume berubah setelah analisa. Jalankan analisa ulang untuk hasil terbaru."
+    : state.claimAnalysisRaw
+      ? "Hasil analisa terakhir tetap tersedia."
+      : "";
+  knowledgeResult.hidden = !state.claimAnalysisRaw;
+  knowledgeResult.textContent = "";
+  if (state.claimAnalysisRaw) renderClaimAnalysis(state.claimAnalysisRaw, knowledgeResult);
+
+  warningList.textContent = "";
+  (warnings.length ? warnings : ["Tidak ada peringatan format lokal. Tetap verifikasi isi klinis."]).forEach((message) => {
+    const item = document.createElement("span");
+    item.className = "cppt-review-warning" + (warnings.length ? "" : " is-clear");
+    item.textContent = message;
+    warningList.appendChild(item);
+  });
+
+  preview.textContent = "";
+  fields.forEach((field) => {
+    const row = document.createElement("section");
+    const title = document.createElement("strong");
+    const content = document.createElement("p");
+    row.className = "cppt-review-field" + (!field.value || field.value === "-" ? " is-empty" : "");
+    title.textContent = field.label;
+    content.textContent = field.value || "Belum diisi";
+    row.append(title, content);
+    preview.appendChild(row);
+  });
+
+  $("#cpptReviewModal").hidden = false;
+  $("[data-review-tab='preview']").focus();
+  updateCpptReviewConfirm();
+  clearInterval(cpptReviewTimer);
+  cpptReviewTimer = setInterval(() => {
+    if (cpptReviewActiveTab !== "preview" || cpptReviewSeconds <= 0) return;
+    cpptReviewSeconds -= 1;
+    if (cpptReviewSeconds <= 0) {
+      clearInterval(cpptReviewTimer);
+      cpptReviewTimer = null;
+    }
+    updateCpptReviewConfirm();
+  }, 1000);
+
+  return new Promise((resolve) => {
+    cpptReviewResolve = resolve;
+  });
+}
+
+$$("[data-review-tab]").forEach((tab) => {
+  tab.addEventListener("click", () => setCpptReviewTab(tab.dataset.reviewTab));
+});
+
+$("#cpptReviewKnowledge")?.addEventListener("click", async () => {
+  const button = $("#cpptReviewKnowledge");
+  const result = $("#cpptReviewKnowledgeResult");
+  const status = $("#cpptReviewKnowledgeStatus");
+  const runId = ++cpptReviewKnowledgeRun;
+  const progressCtl = createAiProgress({
+    panel: $("#cpptReviewKnowledgeProgress"),
+    bar: $("#cpptReviewKnowledgeProgressBar"),
+    text: $("#cpptReviewKnowledgeProgressText"),
+    status,
+  });
+  let completed = false;
+
+  setCpptReviewTab("analysis");
+  cpptReviewKnowledgeBusy = true;
+  button.disabled = true;
+  button.textContent = "Menganalisa...";
+  result.hidden = true;
+  result.textContent = "";
+  updateCpptReviewConfirm();
+
   try {
-    const getVal = (key) =>
-      normalizeErmText(document.querySelector(`#cpptResults textarea[data-key="${key}"]`)?.value ?? "");
-    const payload = {
-      an: getVal("penunjang"),
-      af: getVal("terapi_dirawat"),
-      a: getVal("operasi"),
-      b: getVal("dx_utama"),
-      c: getVal("dx_sekunder"),
-      d: getVal("konsul"),
-      e: getVal("terapi_pulang"),
-    };
+    const { parsed, knowledgeCount } = await analyzeResumeWithKnowledge(progressCtl);
+    if (runId !== cpptReviewKnowledgeRun || $("#cpptReviewModal").hidden) return;
+    state.claimAnalysisStale = false;
+    state.claimAnalysisKnowledgeCount = knowledgeCount;
+    state.claimAnalysisUpdatedAt = new Date().toISOString();
+    renderClaimAnalysis(parsed, result);
+    progressCtl.complete("Analisa selesai memakai " + knowledgeCount + " knowledge relevan.");
+    completed = true;
+  } catch (error) {
+    console.error(error);
+    if (runId !== cpptReviewKnowledgeRun || $("#cpptReviewModal").hidden) return;
+    progressCtl.fail(getAiErrorMessage(error, "Analisa Knowledge BPJS"));
+    if (state.claimAnalysisRaw) renderClaimAnalysis(state.claimAnalysisRaw, result);
+  } finally {
+    if (runId === cpptReviewKnowledgeRun) {
+      cpptReviewKnowledgeBusy = false;
+      button.disabled = false;
+      button.textContent = completed
+        ? "\u{1F9E0} Analisa Ulang Knowledge BPJS"
+        : "\u{1F9E0} Coba Analisa Lagi";
+      updateCpptReviewConfirm();
+    }
+  }
+});
+
+$("#claimStickyToggle")?.addEventListener("click", () => {
+  const toggle = $("#claimStickyToggle");
+  const expanded = toggle.getAttribute("aria-expanded") !== "true";
+  toggle.setAttribute("aria-expanded", String(expanded));
+  $("#claimStickyBody").hidden = !expanded;
+});
+
+$("#claimStickyReanalyze")?.addEventListener("click", () => {
+  void showCpptReviewModal(collectCpptReviewData());
+  setCpptReviewTab("analysis");
+  $("#cpptReviewKnowledge").click();
+});
+
+document.addEventListener("click", (event) => {
+  const trigger = event.target.closest?.("[data-claim-finding]");
+  if (!trigger) return;
+  openClaimFindingDetail(Number(trigger.dataset.claimFinding), trigger);
+});
+
+$("#claimFindingDetailBack")?.addEventListener("click", closeClaimFindingDetail);
+$("#cpptReviewConfirm")?.addEventListener("click", () => closeCpptReviewModal("primary"));
+$("#cpptReviewCancel")?.addEventListener("click", () => closeCpptReviewModal("cancel"));
+$("#insertCPPT").addEventListener("click", async () => {
+  const reviewFields = collectCpptReviewData();
+  if ((await showCpptReviewModal(reviewFields)) !== "primary") return;
+  try {
+    const payload = Object.fromEntries(reviewFields.map((field) => [field.resumeName, field.value]));
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
     if (!tab?.id) throw new Error("Tab aktif tidak ditemukan");
     const [{ result }] = await chrome.scripting.executeScript({
@@ -4887,72 +5328,32 @@ $("#insertPenunjangResume").addEventListener("click", async () => {
 });
 
 // ---------------- Analisa: Kelayakan klaim BPJS ----------------
-$("#analyzeClaimBpjs").addEventListener("click", async () => {
-  const status = $("#claimStatus");
-  const progress = $("#claimProgress");
-  const progressBar = $("#claimProgressBar");
-  const progressText = $("#claimProgressText");
-  const result = $("#claimAnalysisResult");
+$("#analyzeClaimBpjs")?.addEventListener("click", async () => {
   const button = $("#analyzeClaimBpjs");
+  const result = $("#claimAnalysisResult");
   const progressCtl = createAiProgress({
-    panel: progress,
-    bar: progressBar,
-    text: progressText,
-    status,
+    panel: $("#claimProgress"),
+    bar: $("#claimProgressBar"),
+    text: $("#claimProgressText"),
+    status: $("#claimStatus"),
   });
   button.disabled = true;
   result.hidden = true;
   result.textContent = "";
-  state.claimAnalysisRaw = null;
   scheduleDraftSave();
 
   try {
-    await progressCtl.setProgress("Membaca form extension...", 8);
-    const resume = collectResumeForClaimAnalysis();
-    await progressCtl.setProgress("Memeriksa Subjektif...", 18);
-    await progressCtl.setProgress("Memeriksa Objektif...", 28);
-    await progressCtl.setProgress("Memeriksa Rangkuman CPPT...", 42);
-    await progressCtl.setProgress("Memeriksa Penunjang...", 55);
-    await progressCtl.setProgress("Memeriksa Knowledge...", 68);
-    const keywords = extractClaimKeywords(resume);
-    const knowledge = await knowledgeApi("search", { keywords });
-    const chunks = (knowledge.chunks || []).slice(0, 8);
-    let compactResume = compactResumeForClaim(resume, false);
-    let compactChunks = compactKnowledgeChunks(chunks, false);
-    let prompt = formatClaimAnalysisPrompt(compactResume, compactChunks);
-    if (prompt.length > 14000) {
-      await progressCtl.setProgress("Data analisa besar. Menggunakan mode ringkas otomatis...", 72);
-      compactResume = compactResumeForClaim(resume, true);
-      compactChunks = compactKnowledgeChunks(chunks.slice(0, 5), true);
-      prompt = formatClaimAnalysisPrompt(compactResume, compactChunks);
-    }
-
-    await progressCtl.setProgress(`Proses Analisa dengan AI memakai ${compactChunks.length} knowledge relevan...`, 78);
-    progressCtl.startWaiting("Proses Analisa dengan AI");
-    const ai = await getEffectiveAiSettings();
-    const analysis =
-      ai.source === "admin"
-        ? await callAdminAiText({ prompt, responseJson: true, userSession: ai.adminUserSession })
-        : await callProviderText({
-            provider: ai.provider,
-            apiKey: ai.apiKey,
-            model: ai.model,
-            prompt,
-            baseUrl: ai.baseUrl,
-            providerLabel: ai.providerLabel,
-          });
-    if (!analysis.trim()) throw new Error("Respons analisa kosong dari provider");
-
-    progressCtl.stop();
-    await progressCtl.setProgress("Hampir selesai...", 96);
-    const parsed = parseJsonResponse(analysis);
+    const { parsed, knowledgeCount } = await analyzeResumeWithKnowledge(progressCtl);
+    state.claimAnalysisStale = false;
+    state.claimAnalysisKnowledgeCount = knowledgeCount;
+    state.claimAnalysisUpdatedAt = new Date().toISOString();
     renderClaimAnalysis(parsed);
-    progressCtl.complete("Analisa telah selesai.");
-    toast("Analisa klaim selesai", "success");
-  } catch (e) {
-    console.error(e);
-    progressCtl.fail(getAiErrorMessage(e, "Analisa klaim"));
-    toast("Gagal analisa klaim", "error");
+    progressCtl.complete("Analisa selesai memakai " + knowledgeCount + " knowledge relevan.");
+    toast("Analisa knowledge selesai", "success");
+  } catch (error) {
+    console.error(error);
+    progressCtl.fail(getAiErrorMessage(error, "Analisa Knowledge BPJS"));
+    toast("Gagal analisa knowledge", "error");
   } finally {
     button.disabled = false;
   }
@@ -4967,6 +5368,7 @@ document.addEventListener("input", (event) => {
       "#soSubjektif, #soObjektif, #soAssessment, #soPlanning, #soKonsultasi, #penunjangSummary, #cpptResults textarea"
     )
   ) {
+    markClaimAnalysisStale();
     scheduleDraftSave();
   }
 });
