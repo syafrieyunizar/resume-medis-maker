@@ -463,30 +463,7 @@ function collectCpptAudit() {
     saran_dx_utama: $("#cpptDxUtamaSuggest .cppt-ai-suggest-text")?.textContent || "",
     saran_dx_sekunder: $("#cpptDxSekunderSuggest .cppt-ai-suggest-text")?.textContent || "",
     alasan_saran_dx: reason.replace(/^Alasan saran diagnosis:\s*/i, ""),
-    cppt_gaps: normalizeCpptGaps($("#cpptGapsList")?.dataset.gaps || "[]"),
   };
-}
-
-function normalizeCpptGaps(value) {
-  if (typeof value === "string") {
-    const text = normalizeErmText(value).trim();
-    if (!text || text === "-") return [];
-    try {
-      return normalizeCpptGaps(JSON.parse(text));
-    } catch (_error) {
-      return [{ gap: text }];
-    }
-  }
-  if (!Array.isArray(value)) return [];
-  return value
-    .map((item) => (typeof item === "string" ? { gap: item } : item || {}))
-    .map((item) => ({
-      level: normalizeErmText(item.level || item.tingkat || "").trim(),
-      gap: normalizeErmText(item.gap || item.masalah || "").trim(),
-      basis: normalizeErmText(item.basis || item.bukti || "").trim(),
-      suggestion: normalizeErmText(item.suggestion || item.saran || "").trim(),
-    }))
-    .filter((item) => item.gap || item.basis || item.suggestion);
 }
 
 function setCpptSuggestion(id, value) {
@@ -528,29 +505,6 @@ function renderCpptDiagnosisSupport(data = {}) {
     reason.hidden = true;
     reason.textContent = "";
   }
-
-  const gaps = normalizeCpptGaps(data.cppt_gaps);
-  const box = $("#cpptGapsBox");
-  const count = $("#cpptGapsCount");
-  const list = $("#cpptGapsList");
-  if (!box || !count || !list) return;
-  box.hidden = gaps.length === 0;
-  count.textContent = `${gaps.length} catatan`;
-  list.textContent = "";
-  list.dataset.gaps = JSON.stringify(gaps);
-  gaps.forEach((gap) => {
-    const item = document.createElement("div");
-    item.className = "cppt-gap-item";
-    [["Gap", gap.gap], ["Bukti", gap.basis], ["Saran", gap.suggestion]].forEach(([label, value]) => {
-      if (!value) return;
-      const line = document.createElement("div");
-      const strong = document.createElement("strong");
-      strong.textContent = `${label}: `;
-      line.append(strong, value);
-      item.append(line);
-    });
-    list.append(item);
-  });
 }
 
 let cpptDiagnosisStatusTimer = null;
@@ -751,6 +705,7 @@ function applyDraftData(data = {}) {
       $("#penunjangSummary").value = data.penunjang.summary || "";
       state.penunjangFiles = Array.isArray(data.penunjang.files) ? data.penunjang.files : [];
       updatePenunjangList();
+      updateUsePenunjangSummaryButton({ enable: true });
     }
     state.claimAnalysisRaw = data.claim?.raw || null;
     state.claimStickyFindingIndex = 0;
@@ -803,6 +758,7 @@ function resetSidepanelWorkspace() {
     state.penunjangFiles = [];
     $("#penunjangSummary").value = "";
     updatePenunjangList();
+    updateUsePenunjangSummaryButton({ enable: true });
     state.claimAnalysisRaw = null;
     state.claimAnalysisStale = false;
     state.claimAnalysisKnowledgeCount = 0;
@@ -999,7 +955,7 @@ function updatePenunjangList() {
       const ocr = document.createElement("button");
       ocr.type = "button";
       ocr.className = "btn btn-outline btn-small";
-      ocr.textContent = isMeaningfulText(item.ocrText) ? "Edit OCR" : "Proses dengan OCR";
+      ocr.textContent = isMeaningfulText(item.ocrText) ? "Edit OCR" : "Tulis Manual";
       ocr.addEventListener("click", () => processPenunjangOcr(idx, ocr));
       actions.append(ocr);
 
@@ -1075,17 +1031,29 @@ function summarizePulledKinds(files) {
     .join(", ");
 }
 
+function toDateOnly(value) {
+  const date = value instanceof Date ? value : parseFlexibleDate(value);
+  return date && !Number.isNaN(date.getTime()) ? new Date(date.getFullYear(), date.getMonth(), date.getDate()) : null;
+}
+
 function isWithinDateRange(resultDate, start, end) {
-  const date = parseFlexibleDate(resultDate);
-  if (!date || !start || !end) return false;
-  const day = new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime();
-  const startDay = new Date(start.getFullYear(), start.getMonth(), start.getDate()).getTime();
-  const endDay = new Date(end.getFullYear(), end.getMonth(), end.getDate()).getTime();
-  return day >= startDay && day <= endDay;
+  const day = toDateOnly(resultDate)?.getTime();
+  const startDay = toDateOnly(start)?.getTime();
+  const endDay = toDateOnly(end)?.getTime();
+  return Number.isFinite(day) && Number.isFinite(startDay) && Number.isFinite(endDay) && day >= startDay && day <= endDay;
+}
+
+function getPenunjangCarePeriodRange() {
+  const start = toDateOnly(state.cpptSummary?.startDate);
+  const end = toDateOnly(state.cpptSummary?.endDate);
+  if (!start || !end) return { start, end };
+  start.setDate(start.getDate() - 1);
+  return { start, end };
 }
 
 function isWithinCarePeriod(resultDate) {
-  return isWithinDateRange(resultDate, state.cpptSummary?.startDate, state.cpptSummary?.endDate);
+  const range = getPenunjangCarePeriodRange();
+  return isWithinDateRange(resultDate, range.start, range.end);
 }
 function isPdfArrayBuffer(buffer) {
   const head = String.fromCharCode(...new Uint8Array(buffer).slice(0, 4));
@@ -1627,9 +1595,6 @@ function normalizeCpptResult(parsed) {
 
   const result = Object.fromEntries(
     Object.entries(aliases).map(([key, names]) => [key, firstStringValue(payload, names)])
-  );
-  result.cppt_gaps = normalizeCpptGaps(
-    payload?.cppt_gaps || payload?.cpptGaps || payload?.gaps || payload?.kelengkapan_cppt
   );
   return result;
 }
@@ -2930,7 +2895,7 @@ const PROVIDERS = {
   gemini: { label: "Gemini", url: null /* dynamic */ },
   sumopod: { label: "Sumopod", url: "https://ai.sumopod.com/v1/chat/completions" },
   aimurah: { label: "AImurah", url: "https://aimurah.my.id/api/v1/chat/completions" },
-  x5lab: { label: "X5Lab", url: "https://api.x5lab.dev/v1/chat/completions" },
+  semutssh: { label: "SemutSSH", url: "https://ai-partner.semutssh.com/v1/chat/completions" },
 };
 
 function getProviderLabel(provider, customLabel = "") {
@@ -2939,7 +2904,7 @@ function getProviderLabel(provider, customLabel = "") {
 }
 
 function isBuiltInAdminProvider(provider) {
-  return ["gemini", "sumopod", "aimurah", "x5lab"].includes(String(provider || "").trim());
+  return ["gemini", "sumopod", "aimurah", "semutssh"].includes(String(provider || "").trim());
 }
 
 function normalizeAdminProviderKey(value) {
@@ -2965,16 +2930,17 @@ function getProviderDisplay(provider, customLabel = "") {
 function renderAdminProviderOptions(providers = [], activeProvider = "gemini") {
   const select = $("#adminProvider");
   if (!select) return;
-  const previousValue = activeProvider || select.value || "gemini";
+  const removedProviders = new Set(["genfity", "x5lab"]);
+  const previousValue = removedProviders.has(activeProvider) ? "gemini" : activeProvider || select.value || "gemini";
   const options = [
     { value: "gemini", label: "Gemini (Google)" },
     { value: "sumopod", label: "Sumopod" },
     { value: "aimurah", label: "AImurah" },
-    { value: "x5lab", label: "X5Lab" },
+    { value: "semutssh", label: "SemutSSH" },
   ];
   const seen = new Set(options.map((item) => item.value));
   providers.forEach((provider) => {
-    if (!provider?.provider || seen.has(provider.provider)) return;
+    if (!provider?.provider || seen.has(provider.provider) || removedProviders.has(provider.provider)) return;
     options.push({
       value: provider.provider,
       label: provider.providerLabel || getProviderLabel(provider.provider),
@@ -4026,8 +3992,18 @@ $("#generateCpptDiagnosis")?.addEventListener("click", async (event) => {
   }
 });
 
-$("#usePenunjangSummaryForCppt")?.addEventListener("click", (event) => {
-  const button = event.currentTarget;
+function updateUsePenunjangSummaryButton({ enable = true } = {}) {
+  const button = $("#usePenunjangSummaryForCppt");
+  if (!button) return;
+  const hasSummary = isMeaningfulText($("#penunjangSummary")?.value || "");
+  button.hidden = !hasSummary;
+  button.disabled = !hasSummary || !enable;
+  button.classList.remove("btn-outline", "btn-small", "btn-success");
+  button.classList.add("btn-primary");
+  button.innerHTML = "&darr; Gunakan Hasil ini &darr;";
+}
+
+$("#usePenunjangSummaryForCppt")?.addEventListener("click", () => {
   const value = normalizeErmText($("#penunjangSummary")?.value || "").trim();
   const target = $('#cpptResults textarea[data-key="penunjang"]');
   if (!value || !target) {
@@ -4037,15 +4013,8 @@ $("#usePenunjangSummaryForCppt")?.addEventListener("click", (event) => {
   target.value = value;
   target.dispatchEvent(new Event("input", { bubbles: true }));
   updateCpptPenunjangLinked(value);
-  button.classList.remove("btn-outline");
-  button.classList.add("btn-success");
-  button.textContent = "Sudah masuk ke Tab CPPT";
-  clearTimeout(button._stateTimer);
-  button._stateTimer = setTimeout(() => {
-    button.classList.remove("btn-success");
-    button.classList.add("btn-outline");
-    button.textContent = "Gunakan";
-  }, 2500);
+  updateUsePenunjangSummaryButton({ enable: false });
+  toast("Penunjang masuk ke Tab CPPT", "success");
 });
 
 // ---------------- CPPT: Akses ----------------
@@ -4223,7 +4192,6 @@ ATURAN PER FIELD:
 - dx_sekunder: diagnosis komorbid/komplikasi bermakna, dipisah koma. Jangan masukkan keluhan ringan atau semua abnormal lab sebagai diagnosis.
 - konsul: jangan tulis nama dokter/konsulen. Tulis hanya spesialis/bagian/gelar bila terdeteksi, misalnya Konsultasi Sp.PD, Konsultasi Sp.KFR, Konsultasi Sp.JP. Jika hanya nama dokter terbaca tanpa spesialis, tulis Konsultasi bidang lain.
 - terapi_pulang: obat pulang, kontrol, dan rencana lanjut. Jangan campur terapi selama rawat. Jika pasien meninggal, tulis keterangan meninggal dan jam meninggal bila tersedia, misalnya "Meninggal jam 14.35". Jika tidak ada, isi "-".
-- cppt_gaps: bahasa aman, bukan perintah; gunakan pola "Pertimbangkan dokumentasi ... bila sesuai klinis." Jangan menyarankan manipulasi klaim/diagnosis.
 
 CONTOH GAYA YANG BENAR:
 Penunjang: "Hb 7,1->9,4 g/dL, ureum 154->63 mg/dL, SGOT/SGPT 75/134 U/L, USG abdomen: hydrops GB, cholelithiasis, Echo: LVEF 55,64%, TR mild."
@@ -4234,14 +4202,7 @@ CONTOH GAYA YANG SALAH (jangan tiru):
 "Pasien mendapatkan infus NS 14 tpm untuk hidrasi. Dilakukan transfusi PRC sebanyak 3 kolf..."
 
 Berikan output untuk: Pemeriksaan Penunjang Bermakna, Terapi Selama Dirawat, Operasi/Tindakan, Diagnosa Utama, Diagnosa Sekunder, Konsultasi bidang lain, Terapi saat pulang.`;
-
-  const cpptGapPrompt = `
-ATURAN KELENGKAPAN CPPT:
-- cppt_gaps berisi catatan kelengkapan CPPT, bukan perintah.
-- Gunakan bahasa: Pertimbangkan dokumentasi ... bila sesuai klinis.
-`;
-
-  const schema = {
+const schema = {
     type: "object",
     properties: {
       penunjang: { type: "string" },
@@ -4251,18 +4212,6 @@ ATURAN KELENGKAPAN CPPT:
       dx_sekunder: { type: "string" },
       konsul: { type: "string" },
       terapi_pulang: { type: "string" },
-      cppt_gaps: {
-        type: "array",
-        items: {
-          type: "object",
-          properties: {
-            level: { type: "string" },
-            gap: { type: "string" },
-            basis: { type: "string" },
-            suggestion: { type: "string" },
-          },
-        },
-      },
     },
     required: [
       "penunjang",
@@ -4272,7 +4221,6 @@ ATURAN KELENGKAPAN CPPT:
       "dx_sekunder",
       "konsul",
       "terapi_pulang",
-      "cppt_gaps",
     ],
   };
 
@@ -4286,9 +4234,7 @@ ATURAN KELENGKAPAN CPPT:
     const userMsg =
       "Data CPPT:\n\n" +
       sanitizeCpptForAi(state.cpptText) +
-      "\n\n" +
-      cpptGapPrompt +
-      "\n\nKembalikan JSON object dengan key PERSIS berikut: penunjang, terapi_dirawat, operasi, dx_utama, dx_sekunder, konsul, terapi_pulang, cppt_gaps. Jangan gunakan key lain. Field operasi harus berisi tindakan/prosedur/intervensi bermakna termasuk NGT, DC, oksigenasi, nebulisasi, EKG, EEG, Echo, transfusi, HD, dan sejenisnya bila ada. Jangan masukkan tindakan rutin umum seperti infus biasa atau injeksi obat rutin. Jika tidak ada data, isi string dengan '-' dan cppt_gaps dengan array kosong.";
+      "\n\nKembalikan JSON object dengan key PERSIS berikut: penunjang, terapi_dirawat, operasi, dx_utama, dx_sekunder, konsul, terapi_pulang. Jangan gunakan key lain. Field operasi harus berisi tindakan/prosedur/intervensi bermakna termasuk NGT, DC, oksigenasi, nebulisasi, EKG, EEG, Echo, transfusi, HD, dan sejenisnya bila ada. Jangan masukkan tindakan rutin umum seperti infus biasa atau injeksi obat rutin. Jika tidak ada data, isi string dengan '-'.";
 
     let text;
     await progress.setProgress("Menghubungi AI untuk memproses CPPT...", 45);
@@ -4506,6 +4452,7 @@ const pullPeriodConfirm = $("#pullPeriodConfirm");
 const pullPeriodYes = $("#pullPeriodYes");
 const pullPeriodManual = $("#pullPeriodManual");
 const pullPeriodNo = $("#pullPeriodNo");
+const pullPeriodCancel = $("#pullPeriodCancel");
 const pullPeriodChoices = $("#pullPeriodChoices");
 const pullPeriodCalendar = $("#pullPeriodCalendar");
 const pullPeriodApply = $("#pullPeriodApply");
@@ -4577,12 +4524,9 @@ function renderDateRangePicker() {
 }
 
 function showManualDateRange() {
-  const toDateOnly = (value) => {
-    const date = value instanceof Date ? value : parseFlexibleDate(value);
-    return date && !Number.isNaN(date.getTime()) ? new Date(date.getFullYear(), date.getMonth(), date.getDate()) : null;
-  };
-  dateRangeStart = toDateOnly(state.cpptSummary?.startDate);
-  dateRangeEnd = toDateOnly(state.cpptSummary?.endDate);
+  const periodRange = getPenunjangCarePeriodRange();
+  dateRangeStart = toDateOnly(periodRange.start);
+  dateRangeEnd = toDateOnly(periodRange.end);
   const initialDate = dateRangeStart || new Date();
   dateRangeViewMonth = new Date(initialDate.getFullYear(), initialDate.getMonth(), 1);
   pullPeriodChoices.hidden = true;
@@ -4612,6 +4556,7 @@ pullPenunjangBtn.addEventListener("click", () => {
 pullPeriodYes.addEventListener("click", () => pullPenunjangData({ filterByPeriod: true }));
 pullPeriodManual.addEventListener("click", showManualDateRange);
 pullPeriodNo.addEventListener("click", () => pullPenunjangData({ filterByPeriod: false }));
+pullPeriodCancel?.addEventListener("click", () => setPullConfirmVisible(false));
 $("#pullPeriodBack").addEventListener("click", () => {
   pullPeriodCalendar.hidden = true;
   pullPeriodChoices.hidden = false;
@@ -4826,6 +4771,7 @@ async function pullPenunjangData({ filterByPeriod, dateRange = null }) {
     const addedRows = mergePenunjangFiles([...okRows, ...imageRows]);
     updatePenunjangList();
     summarizePenunjangBtn.disabled = state.penunjangFiles.length === 0;
+    updateUsePenunjangSummaryButton({ enable: true });
 
     const manualReviewCount = addedRows.filter((row) => row.requiresManualReview).length;
     if (addedRows.length > 0) {
@@ -4897,6 +4843,7 @@ summarizePenunjangBtn.addEventListener("click", async () => {
   status.hidden = false;
   status.className = "status is-loading";
   summarizePenunjangBtn.disabled = true;
+  updateUsePenunjangSummaryButton({ enable: false });
 
   try {
     const filesForSummary = getSummarizablePenunjangFiles();
@@ -4969,6 +4916,7 @@ summarizePenunjangBtn.addEventListener("click", async () => {
 
     await progress.setProgress("Menyusun rangkuman penunjang...", 94);
     $("#penunjangSummary").value = formatPenunjangSummary(summary);
+    updateUsePenunjangSummaryButton({ enable: true });
     markClaimAnalysisStale();
     queueAutoGrowTextareas();
     scheduleDraftSave();
@@ -5284,47 +5232,6 @@ $("#insertCPPT").addEventListener("click", async () => {
   }
 });
 
-// ---------------- Tindak Lanjut: Masukkan penunjang ke resume ----------------
-$("#insertPenunjangResume").addEventListener("click", async () => {
-  try {
-    const value = normalizeErmText($("#penunjangSummary").value);
-    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-    if (!tab?.id) throw new Error("Tab aktif tidak ditemukan");
-    const [{ result }] = await chrome.scripting.executeScript({
-      target: { tabId: tab.id },
-      func: (val) => {
-        const setVal = (el, nextValue) => {
-          if (!el) return false;
-          const proto = Object.getPrototypeOf(el);
-          const setter = Object.getOwnPropertyDescriptor(proto, "value")?.set;
-          setter ? setter.call(el, nextValue) : (el.value = nextValue);
-          el.dispatchEvent(new Event("input", { bubbles: true }));
-          el.dispatchEvent(new Event("change", { bubbles: true }));
-          return true;
-        };
-        const fields = [...document.querySelectorAll('input[name="an"], textarea[name="an"]')];
-        const el =
-          fields.find(
-            (field) =>
-              field.type !== "hidden" &&
-              !field.disabled &&
-              !field.readOnly &&
-              Boolean(field.offsetWidth || field.offsetHeight || field.getClientRects().length)
-          ) ||
-          fields.find((field) => field.type !== "hidden" && !field.disabled && !field.readOnly) ||
-          fields[0];
-        return setVal(el, val);
-      },
-      args: [value],
-    });
-    if (result) toast("Penunjang dimasukkan ke resume", "success");
-    else toast("Field penunjang resume tidak ditemukan", "error");
-  } catch (e) {
-    console.error(e);
-    toast("Gagal: " + e.message, "error");
-  }
-});
-
 // ---------------- Analisa: Kelayakan klaim BPJS ----------------
 $("#analyzeClaimBpjs")?.addEventListener("click", async () => {
   const button = $("#analyzeClaimBpjs");
@@ -5361,6 +5268,7 @@ document.addEventListener("input", (event) => {
   const target = event.target;
   if (!(target instanceof HTMLElement)) return;
   autoGrowTextarea(target);
+  if (target.matches("#penunjangSummary")) updateUsePenunjangSummaryButton({ enable: true });
   if (
     target.matches(
       "#soSubjektif, #soObjektif, #soAssessment, #soPlanning, #soKonsultasi, #penunjangSummary, #cpptResults textarea"

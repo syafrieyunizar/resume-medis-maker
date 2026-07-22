@@ -41,16 +41,16 @@ type AdminAiUser = {
 const OPENAI_ENDPOINTS: Record<string, string> = {
   sumopod: "https://ai.sumopod.com/v1/chat/completions",
   aimurah: "https://aimurah.my.id/api/v1/chat/completions",
-  genfity: "https://ai.genfity.com/v1/chat/completions",
-  x5lab: "https://api.x5lab.dev/v1/chat/completions",
+  semutssh: "https://ai-partner.semutssh.com/v1/chat/completions",
 };
+
+const REMOVED_PROVIDERS = new Set(["genfity", "x5lab"]);
 
 const PROVIDER_LABELS: Record<string, string> = {
   gemini: "Gemini",
   sumopod: "Sumopod",
   aimurah: "AIMurah",
-  genfity: "Genfity",
-  x5lab: "X5Lab",
+  semutssh: "SemutSSH",
 };
 
 function json(body: unknown, status = 200) {
@@ -137,7 +137,7 @@ function getAppId(payload: Record<string, unknown>) {
 
 function normalizeProviderKey(value: unknown) {
   const provider = String(value || "").trim().toLowerCase().replace(/[^a-z0-9_-]+/g, "-").replace(/^-+|-+$/g, "");
-  if (!/^[a-z0-9][a-z0-9_-]{1,63}$/i.test(provider)) throw new Error("Provider admin tidak valid");
+  if (!/^[a-z0-9][a-z0-9_-]{1,63}$/i.test(provider) || REMOVED_PROVIDERS.has(provider)) throw new Error("Provider admin tidak valid");
   return provider;
 }
 
@@ -236,7 +236,6 @@ function sanitizeAiConfig(config: Record<string, unknown>, appId: string, existi
   if (!apiKey) throw new Error("API key admin wajib diisi");
   if (!model) throw new Error("Model admin wajib diisi");
   return {
-    id: appId,
     app_id: appId,
     provider,
     provider_label: providerLabel || PROVIDER_LABELS[provider] || provider,
@@ -277,13 +276,13 @@ function publicProvider(config: AdminAiConfig) {
 }
 
 async function getAdminAiConfig(appId: string): Promise<AdminAiConfig | null> {
-  const providerRows = await supabaseRequest(`admin_ai_providers?select=*&app_id=eq.${encodeURIComponent(appId)}&active=eq.true&limit=1`, {
+  const providerRows = await supabaseRequest(`admin_ai_providers?select=*&app_id=eq.${encodeURIComponent(appId)}&active=eq.true&provider=not.in.(genfity,x5lab)&limit=1`, {
     method: "GET",
     headers: { Prefer: "" },
   });
   if (providerRows?.[0]) return providerRows[0];
 
-  const rows = await supabaseRequest(`admin_ai_config?select=*&app_id=eq.${encodeURIComponent(appId)}&limit=1`, {
+  const rows = await supabaseRequest(`admin_ai_config?select=*&app_id=eq.${encodeURIComponent(appId)}&provider=not.in.(genfity,x5lab)&limit=1`, {
     method: "GET",
     headers: { Prefer: "" },
   });
@@ -299,7 +298,7 @@ async function getAdminAiProvider(appId: string, provider: string): Promise<Admi
 }
 
 async function listAdminAiProviders(appId: string): Promise<AdminAiConfig[]> {
-  const rows = await supabaseRequest(`admin_ai_providers?select=*&app_id=eq.${encodeURIComponent(appId)}&order=provider.asc`, {
+  const rows = await supabaseRequest(`admin_ai_providers?select=*&app_id=eq.${encodeURIComponent(appId)}&provider=not.in.(genfity,x5lab)&order=provider.asc`, {
     method: "GET",
     headers: { Prefer: "" },
   });
@@ -464,7 +463,6 @@ async function resetAdminAiProvider(appId: string, provider: string) {
   );
   const providerConfig = providerRows?.[0] || { ...existing, ...patch };
   const mirrorConfig = {
-    id: appId,
     app_id: appId,
     provider: existing.provider,
     provider_label: existing.provider_label || null,

@@ -369,9 +369,13 @@ body.is-admin-mode .claim-sticky {
 .textarea { min-height: 80px; line-height: 1.5; overflow: hidden; resize: none; }
 .textarea-long { min-height: 180px; }
 .use-penunjang-cppt {
-  align-self: flex-end;
-  margin-top: -2px;
+  width: 100%;
+  justify-content: center;
+  min-height: 44px;
+  margin: -2px 0 2px;
+  font-size: 14px;
 }
+.use-penunjang-cppt[hidden] { display: none; }
 .input:focus, .textarea:focus {
   border-color: var(--electric-violet);
   box-shadow: 0 0 0 3px rgba(123, 104, 238, 0.15);
@@ -1192,35 +1196,6 @@ body.is-admin-mode .claim-sticky {
 }
 .cppt-dx-reason {
   line-height: 1.5;
-}
-.cppt-gaps {
-  border: 1px solid var(--cloud-gray);
-  border-radius: 8px;
-  padding: 8px 10px;
-}
-.cppt-gaps[hidden] { display: none; }
-.cppt-gaps summary {
-  color: var(--ink-solid);
-  cursor: pointer;
-  font-size: 12px;
-  font-weight: 700;
-}
-.cppt-gaps-list {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  margin-top: 8px;
-}
-.cppt-gap-item {
-  background: var(--whisper-white);
-  border-radius: 8px;
-  color: var(--subtle-gray);
-  font-size: 12px;
-  line-height: 1.45;
-  padding: 8px;
-}
-.cppt-gap-item strong {
-  color: var(--ink-solid);
 }
 .cppt-dx-suggestions {
   border: 1px solid var(--cloud-gray);

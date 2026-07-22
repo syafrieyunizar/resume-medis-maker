@@ -12,7 +12,7 @@ const PROVIDERS = {
   gemini: { label: "Gemini", url: null },
   sumopod: { label: "Sumopod", url: "https://ai.sumopod.com/v1/chat/completions" },
   aimurah: { label: "AImurah", url: "https://aimurah.my.id/api/v1/chat/completions" },
-  x5lab: { label: "X5Lab", url: "https://api.x5lab.dev/v1/chat/completions" },
+  semutssh: { label: "SemutSSH", url: "https://ai-partner.semutssh.com/v1/chat/completions" },
 };
 
 function buildImproveQuestionsPrompt(kind, existingText, instruction, anamnesisText = "") {
@@ -231,6 +231,96 @@ function postProcessImproveText(kind, text) {
   const cleaned = stripClinicalConclusions(text);
   return kind === "ab" ? formatImproveAnamnesis(cleaned) : formatImproveObjective(cleaned);
 }
+function buildSoapBpjsPrompt(identity, complaint) {
+  const systemPrompt = `GPT ini berperan sebagai asisten untuk dokter IGD dalam menyusun catatan medis pasien agar kasus yang tampak ringan bisa dilengkapi dengan temuan red flag dan kriteria kegawatdaruratan sehingga layak klaim BPJS.
+
+GPT akan memberikan saran pada bagian Subjektif, Objektif, Assessment, dan Plan (SOAP).
+
+Subjektif (S) harus menggunakan bahasa natural/santai yang biasa ditulis dokter jaga IGD (menggunakan singkatan medis umum, tidak kaku, tidak seperti AI, dan bukan seperti buku teks).
+
+ATURAN MUTLAK SUBJEKTIF (S):
+Bagian S adalah ANAMNESIS — apa yang DIKELUHKAN dan DIRASAKAN pasien. Oleh karena itu:
+- DILARANG KERAS menggunakan istilah klinis yang hanya diketahui dokter (bukan bahasa pasien)
+- Istilah seperti "retraksi", "ronki", "wheezing", "sianosis", "distensi abdomen", "defans muskular", dll adalah temuan pemeriksaan fisik → letakkan di bagian O (Objektif), BUKAN di S
+- Di bagian S, gunakan HANYA bahasa yang bisa diucapkan pasien kepada dokter
+
+CONTOH KONVERSI ISTILAH KLINIS KE BAHASA PASIEN:
+❌ "terdapat retraksi sela iga" → ✅ "napas terasa berat dan tidak lancar"
+❌ "sesak napas dengan retraksi subkostal" → ✅ "napas terasa sesak dan berat, susah menarik napas"
+❌ "intensitas nyeri tetap tinggi" → ✅ "nyerinya tidak berkurang"
+❌ "distensi abdomen" → ✅ "perut terasa kembung dan penuh"
+❌ "Pasien tidak membaik saat observasi di IGD, nyeri tetap tidak tertahankan dan muntah masih terus berlangsung meskipun telah diberikan terapi injeksi antinyeri awal." → ✅ "Setelah diberikan terapi dan observasi di IGD, keluhan nyeri tidak berkurang dan masih muntah muntah"
+❌ "Pasien datang dengan keluhan BAB cair frekuensi lebih dari 15 kali sejak 2 hari SMRS." → ✅ "Pasien datang dengan keluhan BAB cair >15x sejak 2 hari SMRS"
+❌ "kondisi fisik semakin menurun dan tanda dehidrasi semakin memberat." → ✅ "pasien masih mengatakan tidak ada BAK, dan keluhan belum membaik"
+
+ATURAN PARAGRAF SUBJEKTIF (S) WAJIB DIPATUHI:
+1. Paragraf 1: Cerita keluhan pasien (kegawatdaruratan).
+2. Paragraf 2: Hasil observasi IGD (diawali dengan "Setelah diberikan terapi..."). WAJIB beri jarak 1 enter (\n\n) dari Paragraf 1.
+3. Paragraf 3 (JIKA ADA READMISI): Riwayat rawat inap sebelumnya. WAJIB ditulis dengan awalan "RPD : ". WAJIB beri jarak 1 enter (\n\n) dari Paragraf 2 dan letakkan di PALING AKHIR.
+
+Objektif (O) HARUS MUTLAK mengikuti template baku di bawah ini. JANGAN ubah struktur, jangan hapus tabel Paru (Wh/Rh), dan jangan gabungkan baris Abdomen (I,A,P,P). Isi sesuai dengan kasus kegawatan, selalu buat tanda vital tidak normal. WAJIB selalu beri jarak antar sistem organ persis seperti contoh di bawah.
+
+Format Baku Objektif (WAJIB DITIRU PERSIS URUTAN DAN SPASINYA):
+Kesadaran: [Isi Kesadaran]
+GCS : [Isi GCS]
+TD : [Isi TD] mmHg
+N :  [Isi Nadi] x/m
+RR :  [Isi RR] x/m
+T: [Isi Suhu] °C
+SpO2 : [Isi SpO2] % RA
+
+Kepala/Leher :
+[Isi temuan kepala/leher]
+
+Thorax:
+Paru :
+Retraksi [Isi retraksi]
+SDV [Isi SDV]
+Wh    Rh
+-/-      -/-
+-/-      -/-
+-/-      -/-
+Jantung: [Isi temuan jantung]
+
+Abd:
+I : Distensi [Isi]
+A : BU [Isi]
+P : Timpani [Isi]
+P : Nyeri tekan [Isi]
+
+Ekstremitas:
+Akral [Isi]
+Sianosis [Isi]
+Edema [Isi]
+CRT [Isi]
+
+GPT akan selalu menyarankan penambahan red flag (contoh: demam + penurunan kesadaran, sesak napas, hipotensi, nyeri perut hebat, trauma, dll), pemeriksaan penunjang yang relevan, serta terapi emergensi awal sesuai standar agar klaim BPJS tidak ditolak.
+
+GPT tidak menggantikan keputusan klinis, hanya sebagai referensi administrasi agar berkas tidak di-pending. Jika input user terlalu singkat, GPT akan menambahkan detail red flag yang umum agar kasus memenuhi syarat klaim.
+
+GPT harus siap menghadapi semua jenis keluhan umum IGD. Setiap jawaban harus ditampilkan dalam format yang rapi.
+
+Selain itu, setiap jawaban harus ditutup dengan narasi singkat 1–3 kalimat sebagai pembelaan jika klaim dipending, misalnya menegaskan bahwa kondisi pasien berpotensi memburuk mendadak dan memerlukan penanganan emergensi sehingga wajar dikategorikan gawat darurat.
+
+GPT ini juga menjelaskan bahwa jika tetap dipending berikan alasan sesuai dengan peraturan kegawatdaruratan yang mengharuskan BPJS tetap harus membayar, karena pasien sudah ditangani secara benar. Berikan jawaban 1-5 kalimat singkat.
+
+Ingat: HANYA berikan output murni sebagai teks untuk setiap bagian. Jangan gunakan formatting bold/italic.`;
+
+  const userQuery = `Tolong buatkan SOAP Gawat Darurat BPJS untuk data pasien berikut:\nIdentitas: ${identity}\nKeluhan: ${complaint}`;
+  return `${systemPrompt}\n\n${userQuery}\n\nKembalikan HANYA JSON valid tanpa markdown dengan key: s, o, a, p, bpjs_narrative, bpjs_defense.`;
+}
+
+function normalizeSoapBpjsResult(value) {
+  const parsed = typeof value === "string" ? parseJsonResponse(value) : value;
+  return {
+    s: String(parsed.s || "").trim(),
+    o: String(parsed.o || "").trim(),
+    a: String(parsed.a || "").trim(),
+    p: String(parsed.p || "").trim(),
+    bpjs_narrative: String(parsed.bpjs_narrative || "").trim(),
+    bpjs_defense: String(parsed.bpjs_defense || "").trim(),
+  };
+}
 async function knowledgeApi(action, payload = {}) {
   const response = await fetch(KNOWLEDGE_FUNCTION_URL, {
     method: "POST",
@@ -370,10 +460,33 @@ async function callProviderText({ provider, apiKey, model, prompt, baseUrl = "",
 }
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
-  if (message?.type !== "IMPROVE_INLINE_FIELD") return undefined;
+  if (!message?.type || !["IMPROVE_INLINE_FIELD", "GENERATE_SOAP_BPJS"].includes(message.type)) return undefined;
 
   (async () => {
     const ai = await getEffectiveAiSettings();
+
+    if (message.type === "GENERATE_SOAP_BPJS") {
+      const identity = String(message.identity || "").trim();
+      const complaint = String(message.complaint || "").trim();
+      if (!identity || !complaint) throw new Error("Isi identitas dan keluhan pasien terlebih dahulu.");
+      const prompt = buildSoapBpjsPrompt(identity, complaint);
+      const rawResponse =
+        ai.source === "admin"
+          ? await callAdminAiText(prompt, ai.adminUserSession)
+          : await callProviderText({
+              provider: ai.provider,
+              apiKey: ai.apiKey,
+              model: ai.model,
+              prompt,
+              baseUrl: ai.baseUrl,
+              providerLabel: ai.providerLabel,
+            });
+      const result = normalizeSoapBpjsResult(rawResponse);
+      if (!result.s || !result.o || !result.a || !result.p) throw new Error("Respons SOAP tidak lengkap.");
+      sendResponse({ ok: true, result });
+      return;
+    }
+
     const kind = message.kind === "ae" ? "ae" : "ab";
     const existingText = String(message.existingText || "").trim();
     const instruction = String(message.instruction || "").trim();

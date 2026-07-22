@@ -96,7 +96,7 @@
                 <option value="gemini">Gemini (Google)</option>
                 <option value="sumopod">Sumopod</option>
                 <option value="aimurah">AImurah</option>
-                <option value="x5lab">X5Lab</option>
+                <option value="semutssh">SemutSSH</option>
                 <option value="custom">Provider Lain</option>
               </select>
             </label>
@@ -179,7 +179,7 @@
                   <option value="gemini">Gemini (Google)</option>
                   <option value="sumopod">Sumopod</option>
                   <option value="aimurah">AImurah</option>
-                  <option value="x5lab">X5Lab</option>
+                  <option value="semutssh">SemutSSH</option>
                   <option value="custom">Provider Lain</option>
                 </select>
               </label>
@@ -412,10 +412,6 @@
             <span class="label">Terapi Saat Pulang</span>
             <textarea class="textarea" rows="3" data-key="terapi_pulang"></textarea>
           </div>
-          <details id="cpptGapsBox" class="cppt-gaps" hidden>
-            <summary>Kelengkapan CPPT: <span id="cpptGapsCount">0 catatan</span></summary>
-            <div id="cpptGapsList" class="cppt-gaps-list"></div>
-          </details>
           <p class="insert-guide">&darr; Tekan tombol dibawah untuk memasukkan semua data ke dalam resume medis &darr;</p>
           <button id="insertCPPT" class="btn btn-primary">Masukkan Semua Data ke Resume</button>
         </div>
@@ -430,9 +426,9 @@
         </label>
         <label class="field">
           <span class="label">Pemeriksaan Penunjang Bermakna</span>
-          <button id="usePenunjangSummaryForCppt" class="btn btn-outline btn-small use-penunjang-cppt" type="button">Gunakan</button>
           <textarea id="penunjangSummary" class="textarea textarea-long" rows="10" placeholder="Hasil rangkuman penunjang bermakna akan muncul di sini..."></textarea>
         </label>
+        <button id="usePenunjangSummaryForCppt" class="btn btn-primary use-penunjang-cppt" type="button" hidden>&darr; Gunakan Hasil ini &darr;</button>
 
         <div id="pullPeriodConfirm" class="full-panel-modal pull-period-modal" hidden role="dialog" aria-modal="true" aria-labelledby="pullPeriodConfirmTitle">
           <div class="full-panel-dialog pull-period-dialog">
@@ -442,6 +438,7 @@
                 <button id="pullPeriodYes" class="btn btn-primary" type="button">Ya, sesuai periode</button>
                 <button id="pullPeriodManual" class="btn btn-outline" type="button">Saya atur tanggal sendiri</button>
                 <button id="pullPeriodNo" class="btn btn-outline" type="button">Tidak, tarik semua</button>
+                <button id="pullPeriodCancel" class="btn btn-outline" type="button">Kembali</button>
               </div>
             </div>
 
@@ -490,11 +487,6 @@
           <span class="label">Data yang ditarik</span>
           <div id="penunjangList" class="pulled-list is-empty">Belum ada data penunjang.</div>
           <button id="summarizePenunjang" class="btn btn-outline" disabled>🧠 Rangkum Penunjang</button>
-        </div>
-
-        <div class="action-row insert-bottom">
-          <p class="insert-guide">&darr; Tekan tombol dibawah untuk memasukkan semua data ke dalam resume medis &darr;</p>
-          <button id="insertPenunjangResume" class="btn btn-primary">Masukkan ke Resume Medis</button>
         </div>
       </section>
 

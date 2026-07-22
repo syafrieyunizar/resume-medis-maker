@@ -382,10 +382,196 @@
     });
   }
 
+  function getAnonymousPatientIdentity() {
+    const text = (document.querySelector(".box-header")?.innerText || "").replace(/\s+/g, " ").trim();
+    const gender = /\b(Laki[-\s]?Laki|Perempuan)\b/i.exec(text)?.[1] || "";
+    const age = /\b(\d+\s+tahun(?:\s+\d+\s+bulan)?(?:\s+\d+\s+hari)?)\b/i.exec(text)?.[1] || "";
+    return [gender, age].filter(Boolean).join(" / ");
+  }
+
+  function getSoapFields() {
+    return {
+      subjektif: document.querySelector('textarea[name="subjektif"]'),
+      objektif: document.querySelector('textarea[name="objektive"]'),
+      assessment: document.querySelector('textarea[name="assesment"]'),
+      planning: document.querySelector('textarea[name="planning"]'),
+    };
+  }
+
+  function applySoapResult(result) {
+    const fields = getSoapFields();
+    if (!fields.subjektif || !fields.objektif || !fields.assessment || !fields.planning) {
+      throw new Error("Field SOAP halaman tidak ditemukan.");
+    }
+    setValue(fields.subjektif, result.s || "");
+    setValue(fields.objektif, result.o || "");
+    setValue(fields.assessment, result.a || "");
+    setValue(fields.planning, result.p || "");
+  }
+
+  function getSoapStorageKey() {
+    return `rmrSoapResult:${location.origin}${location.pathname}${location.search}`;
+  }
+
+  function saveSoapResult(result) {
+    return chrome.storage.local.set({ [getSoapStorageKey()]: result });
+  }
+
+  async function loadSoapResult() {
+    return (await chrome.storage.local.get(getSoapStorageKey()))[getSoapStorageKey()] || null;
+  }
+
+  function showSoapPreview(result, onApply) {
+    document.querySelector(".rmr-soap-preview-modal")?.remove();
+    const modal = document.createElement("div");
+    modal.className = "rmr-soap-preview-modal";
+    modal.innerHTML = `
+      <div class="rmr-soap-preview-dialog" role="dialog" aria-modal="true" aria-label="Preview SOAP">
+        <div class="rmr-soap-preview-title">Preview SOAP</div>
+        <label>S<textarea rows="5" data-soap-key="s"></textarea></label>
+        <label>O<textarea rows="7" data-soap-key="o"></textarea></label>
+        <div class="rmr-soap-preview-next">
+          <button type="button" class="rmr-inline-btn rmr-inline-btn-primary" data-soap-next>Generate A dan P</button>
+          <span data-soap-loading hidden>Menyusun A dan P...</span>
+        </div>
+        <label data-soap-ap hidden>A<textarea rows="3" data-soap-key="a"></textarea></label>
+        <label data-soap-ap hidden>P<textarea rows="4" data-soap-key="p"></textarea></label>
+        <div class="rmr-inline-actions">
+          <button type="button" class="rmr-inline-btn rmr-inline-btn-primary" data-soap-apply hidden>OK, masukkan</button>
+          <button type="button" class="rmr-inline-btn rmr-inline-btn-secondary" data-soap-cancel>Batal</button>
+        </div>
+      </div>`;
+    document.body.append(modal);
+    ["s", "o", "a", "p"].forEach((key) => {
+      const textarea = modal.querySelector(`[data-soap-key="${key}"]`);
+      textarea.value = result[key] || "";
+      autoGrowTextarea(textarea);
+    });
+    modal.querySelector("[data-soap-cancel]").addEventListener("click", () => modal.remove());
+    modal.querySelector("[data-soap-next]").addEventListener("click", (event) => {
+      const button = event.currentTarget;
+      const loading = modal.querySelector("[data-soap-loading]");
+      button.disabled = true;
+      loading.hidden = false;
+      setTimeout(() => {
+        modal.querySelectorAll("[data-soap-ap]").forEach((element) => (element.hidden = false));
+        modal.querySelector("[data-soap-apply]").hidden = false;
+        modal.querySelector(".rmr-soap-preview-next").hidden = true;
+        queueAutoGrowTextareas(modal);
+      }, 700);
+    });
+    modal.querySelector("[data-soap-apply]").addEventListener("click", async () => {
+      const edited = { ...result };
+      ["s", "o", "a", "p"].forEach((key) => {
+        edited[key] = modal.querySelector(`[data-soap-key="${key}"]`).value.trim();
+      });
+      await onApply(edited);
+      modal.remove();
+    });
+  }
+
+  function createSoapGeneratorUi() {
+    const title = document.querySelector("#muncul1");
+    if (!title || title.dataset.rmrSoapGeneratorReady === "1") return;
+    if ((title.textContent || "").trim().toUpperCase() !== "SOAP") return;
+    title.dataset.rmrSoapGeneratorReady = "1";
+
+    const trigger = document.createElement("button");
+    trigger.type = "button";
+    trigger.className = "rmr-soap-gen-trigger";
+    trigger.textContent = "SOAP generator";
+    title.insertAdjacentElement("afterend", trigger);
+
+    const panel = document.createElement("div");
+    panel.className = "rmr-soap-gen-panel";
+    panel.hidden = true;
+    panel.innerHTML = `
+      <div class="rmr-soap-gen-identity" data-rmr-soap-identity>Identitas anonim: -</div>
+      <textarea class="rmr-inline-input" rows="3" data-rmr-soap-complaint placeholder="Keluhan pasien"></textarea>
+      <div class="rmr-inline-status" data-rmr-soap-status hidden></div>
+      <div class="rmr-inline-actions">
+        <button type="button" class="rmr-inline-btn rmr-inline-btn-primary" data-rmr-soap-generate>Buat SOAP</button>
+        <button type="button" class="rmr-inline-btn rmr-inline-btn-secondary" data-rmr-soap-preview hidden>Preview</button>
+        <button type="button" class="rmr-inline-btn rmr-inline-btn-secondary" data-rmr-soap-close>Tutup</button>
+      </div>`;
+    (title.closest(".box-rm03biru") || title.parentElement || title).insertAdjacentElement("afterend", panel);
+
+    const identity = panel.querySelector("[data-rmr-soap-identity]");
+    const complaint = panel.querySelector("[data-rmr-soap-complaint]");
+    const status = panel.querySelector("[data-rmr-soap-status]");
+    const generate = panel.querySelector("[data-rmr-soap-generate]");
+    const previewSaved = panel.querySelector("[data-rmr-soap-preview]");
+
+    const refreshSavedPreview = async () => {
+      previewSaved.hidden = !(await loadSoapResult());
+    };
+
+    const showStatus = (message, kind) => {
+      status.hidden = false;
+      status.className = `rmr-inline-status ${kind ? `is-${kind}` : ""}`.trim();
+      status.textContent = message;
+    };
+
+    trigger.addEventListener("click", () => {
+      panel.hidden = !panel.hidden;
+      identity.textContent = `Identitas anonim: ${getAnonymousPatientIdentity() || "tidak terbaca"}`;
+      refreshSavedPreview();
+      if (!panel.hidden) complaint.focus();
+    });
+    panel.querySelector("[data-rmr-soap-close]").addEventListener("click", () => {
+      panel.hidden = true;
+      status.hidden = true;
+    });
+    previewSaved.addEventListener("click", async () => {
+      const saved = await loadSoapResult();
+      if (!saved) return;
+      showSoapPreview(saved, async (edited) => {
+        await saveSoapResult(edited);
+        applySoapResult(edited);
+        showStatus("SOAP berhasil dimasukkan ke halaman.", "success");
+      });
+    });
+    generate.addEventListener("click", async () => {
+      const patientIdentity = getAnonymousPatientIdentity();
+      const patientComplaint = complaint.value.trim();
+      if (!patientIdentity) {
+        showStatus("Umur/jenis kelamin pasien tidak terbaca dari header.", "error");
+        return;
+      }
+      if (!patientComplaint) {
+        showStatus("Isi keluhan pasien terlebih dahulu.", "error");
+        return;
+      }
+      generate.disabled = true;
+      showStatus("Membuat SOAP BPJS...", "loading");
+      try {
+        const response = await chrome.runtime.sendMessage({
+          type: "GENERATE_SOAP_BPJS",
+          identity: patientIdentity,
+          complaint: patientComplaint,
+        });
+        if (!response?.ok) throw new Error(response?.error || "Gagal membuat SOAP.");
+        const result = response.result || {};
+        await saveSoapResult(result);
+        await refreshSavedPreview();
+        showSoapPreview(result, async (edited) => {
+          await saveSoapResult(edited);
+          applySoapResult(edited);
+          showStatus("SOAP berhasil dimasukkan ke halaman.", "success");
+        });
+        showStatus("Preview SOAP siap diedit.", "success");
+      } catch (error) {
+        showStatus(error instanceof Error ? error.message : String(error), "error");
+      } finally {
+        generate.disabled = false;
+      }
+    });
+  }
+
   function boot() {
+    createSoapGeneratorUi();
     if (!isEligiblePage()) return;
     TARGETS.forEach(createFieldUi);
-    queueAutoGrowTextareas();
   }
 
 

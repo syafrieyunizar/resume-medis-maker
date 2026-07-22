@@ -113,9 +113,10 @@
   border: 1px solid #a3a3a3;
   border-radius: 6px;
   color: #111111;
-  font-family: inherit;
-  font-size: 13px;
-  line-height: 1.5;
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-size: 14px;
+  font-weight: 400;
+  line-height: 1.55;
   outline: none;
   overflow: hidden;
   padding: 8px 10px;
@@ -227,4 +228,117 @@
 
 .rmr-inline-warning[hidden] {
   display: none;
+}
+
+.rmr-soap-gen-trigger {
+  appearance: none;
+  background: #ffffff;
+  border: 1px solid rgba(255, 255, 255, 0.9);
+  border-radius: 4px;
+  color: #1f6fd8;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 700;
+  margin-left: 10px;
+  padding: 3px 8px;
+  vertical-align: 1px;
+}
+
+.rmr-soap-gen-trigger:hover {
+  background: #eef6ff;
+}
+
+.rmr-soap-gen-panel {
+  background: #ffffff;
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  border: 1px solid #1f6fd8;
+  border-radius: 6px;
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.12);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 8px 0 12px;
+  max-width: 720px;
+  padding: 10px;
+}
+
+.rmr-soap-gen-panel[hidden] {
+  display: none;
+}
+.rmr-soap-gen-identity {
+  color: #1f2937;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.rmr-soap-preview-modal {
+  align-items: center;
+  background: rgba(15, 23, 42, 0.55);
+  display: flex;
+  inset: 0;
+  justify-content: center;
+  padding: 16px;
+  position: fixed;
+  z-index: 2147483647;
+}
+
+.rmr-soap-preview-dialog {
+  background: #ffffff;
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  border-radius: 8px;
+  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.28);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 92vh;
+  max-width: 760px;
+  overflow: auto;
+  padding: 14px;
+  width: min(760px, 100%);
+}
+
+.rmr-soap-preview-title {
+  color: #111111;
+  font-size: 16px;
+  font-weight: 800;
+}
+
+.rmr-soap-preview-next {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+}
+
+.rmr-soap-preview-next[hidden],
+.rmr-soap-preview-next span[hidden],
+.rmr-soap-preview-dialog [hidden] {
+  display: none;
+}
+
+.rmr-soap-preview-next span {
+  color: #525252;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.rmr-soap-preview-dialog label {
+  color: #111111;
+  display: flex;
+  flex-direction: column;
+  font-size: 12px;
+  font-weight: 700;
+  gap: 4px;
+}
+
+.rmr-soap-preview-dialog textarea {
+  border: 1px solid #a3a3a3;
+  border-radius: 6px;
+  color: #111111;
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-size: 14px;
+  font-weight: 400;
+  line-height: 1.55;
+  padding: 8px 10px;
+  resize: vertical;
+  width: 100%;
 }
