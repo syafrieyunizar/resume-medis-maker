@@ -616,6 +616,7 @@
   function showMagicSoapHelp(anchor) {
     const current = document.querySelector(".rmr-soap-help-popover");
     if (current) {
+      current.rmrCleanup?.();
       current.remove();
       return;
     }
@@ -623,35 +624,67 @@
     popover.className = "rmr-soap-help-popover";
     popover.innerHTML = `
       <div class="rmr-soap-help-warning">\u26A0\uFE0F Semua keputusan klinis tetap ditangan dokter yang merawat</div>
-      <section class="rmr-soap-help-card">
-        <strong>Apa fungsi Magic SOAP?</strong>
-        <p>Magic SOAP membaca S/O/A/P yang sudah ditulis ringkas, lalu mengembangkannya menjadi SOAP IGD BPJS dengan red flag kegawatdaruratan.</p>
-        <p>Pilih Rawat inap bila setelah terapi IGD keluhan belum membaik, Rawat jalan bila membaik setelah terapi, atau Dari poli bila pasien memerlukan rawat inap maupun rencana tindakan.</p>
-        <p>A boleh kosong dan akan dibuat berdasarkan S dan O hasil AI. P boleh kosong; bila diisi, terapi dokter dirapikan dan dilengkapi dengan usulan bila sesuai.</p>
-      </section>
-      <section class="rmr-soap-help-card">
-        <strong>Aturan BPJS IGD</strong>
-        <p>Berdasarkan Matriks Ketentuan Penjaminan dan Penagihan Klaim IGD pada BA Kesepakatan No. 1247/BA/1124, kasus IGD harus memenuhi salah satu kriteria gawat darurat:</p>
-        <ol type="a">
-          <li>Mengancam nyawa, membahayakan diri dan orang lain/lingkungan.</li>
-          <li>Adanya gangguan pada jalan napas, pernafasan, dan sirkulasi.</li>
-          <li>Adanya penurunan kesadaran.</li>
-          <li>Adanya gangguan hemodinamik; dan/atau.</li>
-          <li>Memerlukan tindakan segera.</li>
-        </ol>
-      </section>
-      <section class="rmr-soap-help-card">
-        <strong>Contoh</strong>
-        <p><b>Input:</b> S nyeri kaki kiri; O kaki bengkak (+); A fraktur tibia fibula; P NS 20 tpm, keto 1 amp.</p>
-        <p><b>Hasil:</b> A Close fracture tibia et fibula sinistra; P IVFD NS 20 tpm, Inj. Ketorolac 30 mg; Usul: KIE tindakan/operasi.</p>
-      </section>`;
+      <div class="rmr-soap-help-grid">
+        <section class="rmr-soap-help-card">
+          <strong>Cara Pakai</strong>
+          <ol>
+            <li>Masukkan S,O,A,P singkat seperti contoh dibawah kedalam masing masing kolom.</li>
+            <li>Tekan tombol Magic SOAP, dan pilih pasien rawat inap, rawat jalan, atau dari poli (bukan masuk lewat IGD).</li>
+            <li>Output langsung masuk ke masing masing kolom \u{1F44D}</li>
+          </ol>
+          <p><b>*WAJIB diisi adalah kolom Subjektif. Sisanya Optional.</b></p>
+        </section>
+        <section class="rmr-soap-help-card">
+          <strong>Contoh cara pengisian</strong>
+          <p>Input dokter pada kolom S,O,A,P :</p>
+          <pre>S : bab cair, mual, muntah
+O : dehidrasi
+A : gea
+P : RL 500cc, ranitidin, ondancetron 4mg</pre>
+        </section>
+        <section class="rmr-soap-help-card rmr-soap-help-card-wide">
+          <strong>Aturan BPJS IGD</strong>
+          <p>Berdasarkan Matriks Ketentuan Penjaminan dan Penagihan Klaim IGD pada BA Kesepakatan No. 1247/BA/1124, kasus IGD harus memenuhi salah satu kriteria gawat darurat:</p>
+          <ol type="a">
+            <li>Mengancam nyawa, membahayakan diri dan orang lain/lingkungan.</li>
+            <li>Adanya gangguan pada jalan napas, pernafasan, dan sirkulasi.</li>
+            <li>Adanya penurunan kesadaran.</li>
+            <li>Adanya gangguan hemodinamik; dan/atau.</li>
+            <li>Memerlukan tindakan segera.</li>
+          </ol>
+        </section>
+      </div>`;
     const close = createButton("Tutup", "rmr-inline-btn-secondary");
     popover.append(close);
     document.body.append(popover);
     const rect = anchor.getBoundingClientRect();
     popover.style.left = `${Math.max(8, Math.min(rect.left, window.innerWidth - popover.offsetWidth - 8))}px`;
     popover.style.top = `${Math.max(8, Math.min(rect.bottom + 6, window.innerHeight - popover.offsetHeight - 8))}px`;
-    close.addEventListener("click", () => popover.remove());
+    const closePopover = () => {
+      document.removeEventListener("pointerdown", outsideClick);
+      popover.remove();
+    };
+    const outsideClick = (event) => {
+      if (!popover.contains(event.target) && event.target !== anchor) closePopover();
+    };
+    popover.rmrCleanup = () => document.removeEventListener("pointerdown", outsideClick);
+    setTimeout(() => document.addEventListener("pointerdown", outsideClick), 0);
+    const handle = popover.querySelector(".rmr-soap-help-warning");
+    handle.addEventListener("pointerdown", (event) => {
+      const startRect = popover.getBoundingClientRect();
+      const offsetX = event.clientX - startRect.left;
+      const offsetY = event.clientY - startRect.top;
+      handle.setPointerCapture(event.pointerId);
+      const move = (moveEvent) => {
+        popover.style.left = `${Math.max(0, Math.min(moveEvent.clientX - offsetX, window.innerWidth - popover.offsetWidth))}px`;
+        popover.style.top = `${Math.max(0, Math.min(moveEvent.clientY - offsetY, window.innerHeight - popover.offsetHeight))}px`;
+      };
+      const stop = () => handle.removeEventListener("pointermove", move);
+      handle.addEventListener("pointermove", move);
+      handle.addEventListener("pointerup", stop, { once: true });
+      handle.addEventListener("pointercancel", stop, { once: true });
+    });
+    close.addEventListener("click", closePopover);
   }
   function createSoapGeneratorUi() {
     const title = document.querySelector("#muncul1");

@@ -180,7 +180,7 @@ function parseJsonResponse(text) {
 function normalizeSpacing(text) {
   return String(text || "")
     .replace(/\r/g, "")
-    .replace(/[â†’â‡’âž”âžœâžâžž]/g, "->")
+    .replace(/[Ã¢â€ â€™Ã¢â€¡â€™Ã¢Å¾â€Ã¢Å¾Å“Ã¢Å¾ÂÃ¢Å¾Å¾]/g, "->")
     .replace(/[ \t]+\n/g, "\n")
     .replace(/\n{3,}/g, "\n\n")
     .trim();
@@ -323,7 +323,9 @@ CONTOH KONVERSI ISTILAH KLINIS KE BAHASA PASIEN DAN BAHASA DOKTER:
 
 ATURAN NORMALISASI BAHASA ANAMNESIS:
 - Buat bahasa Subjektif senatural mungkin seperti catatan dokter IGD Indonesia.
-- Untuk keluhan yang disangkal, ubah menjadi format ringkas dokter dengan tanda negatif.
+- Jangan membuat kalimat terlalu baku atau seperti artikel.
+- Jangan mengubah makna klinis dari input dokter.
+- Untuk keluhan yang disangkal, ubah menjadi format ringkas dokter dengan tanda negatif bila ditulis ringkas.
 - Contoh:
   "muntah tidak ada" menjadi "muntah (-)"
   "tidak ada muntah" menjadi "muntah (-)"
@@ -337,19 +339,32 @@ ATURAN NORMALISASI BAHASA ANAMNESIS:
   "kejang satu kali" menjadi "kejang 1x"
   "demam lima hari" menjadi "demam 5 hari"
   "nyeri sejak tiga jam" menjadi "nyeri sejak 3 jam"
-- Jangan membuat kalimat terlalu baku atau seperti artikel.
-- Jangan mengubah makna klinis dari input dokter.
 
-ATURAN PARAGRAF SUBJEKTIF (S) WAJIB DIPATUHI:
+ATURAN FORMAT SUBJEKTIF (S) WAJIB DIPATUHI:
 1. S harus lebih detail dan lengkap daripada input awal dokter. Jangan hanya menyalin atau membuat parafrase pendek.
 2. Kembangkan S menjadi anamnesis IGD yang natural, runtut, dan defensible untuk kegawatdaruratan, tetapi DILARANG mengarang fakta spesifik yang tidak didukung data awal.
-3. S wajib memiliki panjang dan kedalaman setara 2 sampai 3 paragraf, tetapi ditulis sebagai satu blok narasi utuh dalam satu nilai string "s". Jangan gunakan baris kosong, judul, nomor, atau bullet di dalam S.
-4. Awali dengan cerita keluhan utama secara lengkap berdasarkan data yang tersedia: onset, durasi, lokasi, penjalaran bila relevan, karakter, perburukan, pencetus, pemberat/peringan, dan keluhan penyerta. Gunakan hanya unsur yang tersedia atau dapat dinyatakan secara umum tanpa membuat fakta baru.
-5. Dalam blok narasi yang sama, lanjutkan dengan hasil observasi IGD atau alasan rawat inap/rawat jalan/dari poli sesuai status pelayanan.
-6. Bagian respons terapi wajib diawali dengan "Setelah diberikan terapi..." untuk RAWAT INAP dan RAWAT JALAN.
-7. Untuk DARI POLI, bagian konteks pelayanan boleh diawali dengan "Pasien dari poli..." atau kalimat natural lain yang menjelaskan kebutuhan rawat inap.
-8. Bila data awal memuat RPD, RPO, riwayat alergi, riwayat terapi, atau riwayat penting lain, letakkan di bagian akhir blok narasi. Jangan membuat riwayat yang tidak diberikan.
-9. Seluruh anamnesis wajib tetap menyatu dalam satu blok tanpa pemisah baris kosong.
+3. S wajib tetap berada dalam satu nilai string JSON "s", tetapi isi string wajib memakai newline escaped "\n" untuk memisahkan bagian sesuai aturan di bawah.
+4. Setiap gejala/keluhan utama wajib dipisahkan dengan newline "\n".
+5. Setiap gejala yang ada wajib diberi tanda "(+)" setelah nama gejala di awal kalimat, lalu dilanjutkan dengan deskripsinya.
+6. Format natural yang diharapkan:
+   "Pasien datang dengan keluhan sesak napas (+) yang dirasakan memberat sejak tadi malam. Sesak dirasakan terus-menerus dan semakin berat saat pasien batuk atau beraktivitas."
+   "Pasien juga mengeluhkan batuk (+) yang sudah berlangsung hampir 1 bulan ini, batuk disertai dahak yang sulit dikeluarkan."
+   "Pasien mengeluhkan nyeri dada (+) di sebelah kiri yang terasa seperti tertusuk, terutama saat pasien menarik napas dalam atau saat batuk."
+7. Keluhan yang disangkal boleh tetap dalam satu kalimat natural, misalnya:
+   "Keluhan demam, mual, maupun muntah disangkal oleh pasien."
+8. Bila keluhan negatif ditulis ringkas, gunakan format seperti "demam (-)", "mual (-)", "muntah (-)", atau "sesak (-)".
+9. Awali dengan cerita keluhan utama secara lengkap berdasarkan data yang tersedia: onset, durasi, lokasi, penjalaran bila relevan, karakter, perburukan, pencetus, pemberat/peringan, dan keluhan penyerta. Gunakan hanya unsur yang tersedia atau dapat dinyatakan secara umum tanpa membuat fakta baru.
+10. Jika data awal memuat RPD, riwayat penyakit dahulu, riwayat pemeriksaan sebelumnya, riwayat pengobatan, atau riwayat penting lain, pisahkan dengan dua newline "\n\n" lalu tulis dengan heading "RPD :".
+11. Jika ada RPO, pisahkan dengan dua newline "\n\n" lalu tulis sebagai "RPO :".
+12. Jika ada riwayat alergi, pisahkan dengan dua newline "\n\n" lalu tulis sebagai "Alergi :".
+13. Setelah bagian riwayat, pisahkan lagi dengan dua newline "\n\n" sebelum konteks terapi/observasi IGD bila ada.
+14. Untuk RAWAT INAP dan RAWAT JALAN, bagian respons terapi wajib diawali dengan "Setelah diberikan terapi...".
+15. Untuk RAWAT INAP, jelaskan bahwa setelah terapi awal keluhan belum membaik sepenuhnya, masih memberat, masih membutuhkan observasi ketat, atau masih membutuhkan rawat inap/perawatan lanjutan sesuai konteks klinis.
+16. Untuk RAWAT JALAN, jelaskan bahwa setelah terapi keluhan membaik dan kondisi lebih stabil bila sesuai konteks klinis.
+17. Untuk DARI POLI, gunakan konteks "Pasien dari poli..." atau kalimat natural lain yang menjelaskan kebutuhan rawat inap, observasi, terapi lanjutan, rencana tindakan, atau alasan klinis lain.
+18. Bila data awal memuat RPD, RPO, riwayat alergi, riwayat terapi, atau riwayat penting lain, letakkan di bagian riwayat yang sesuai. Jangan membuat riwayat yang tidak diberikan.
+19. Jangan memasukkan temuan objektif/pemeriksaan fisik ke bagian S.
+20. Jangan gunakan bullet, nomor, atau judul selain heading riwayat seperti "RPD :", "RPO :", dan "Alergi :".
 
 ATURAN MUTLAK OBJEKTIF (O):
 Objektif (O) HARUS MUTLAK mengikuti template baku di bawah ini.

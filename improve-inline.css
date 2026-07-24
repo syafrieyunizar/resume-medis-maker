@@ -341,15 +341,25 @@
 .rmr-soap-help-popover {
   max-height: calc(100vh - 16px);
   overflow: auto;
-  width: min(520px, calc(100vw - 16px));
+  resize: both;
+  width: min(860px, calc(100vw - 16px));
+}
+
+.rmr-soap-help-grid {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
 .rmr-soap-help-warning {
   background: #b91c1c;
   border-radius: 6px;
   color: #ffffff;
+  cursor: move;
   font-weight: 800;
   padding: 10px;
+  touch-action: none;
+  user-select: none;
 }
 
 .rmr-soap-help-card {
@@ -361,6 +371,25 @@
 
 .rmr-soap-help-card p {
   margin: 7px 0 0;
+}
+.rmr-soap-help-card-wide {
+  grid-column: 1 / -1;
+}
+
+.rmr-soap-help-card pre {
+  background: #ffffff;
+  border: 1px solid #d4d4d4;
+  border-radius: 6px;
+  font: inherit;
+  margin: 8px 0 0;
+  padding: 8px;
+  white-space: pre-wrap;
+}
+
+@media (max-width: 720px) {
+  .rmr-soap-help-grid {
+    grid-template-columns: 1fr;
+  }
 }
 
 .rmr-soap-help-card ol {
