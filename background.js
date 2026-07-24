@@ -180,7 +180,7 @@ function parseJsonResponse(text) {
 function normalizeSpacing(text) {
   return String(text || "")
     .replace(/\r/g, "")
-    .replace(/[→⇒➔➜➝➞]/g, "->")
+    .replace(/[â†’â‡’âž”âžœâžâžž]/g, "->")
     .replace(/[ \t]+\n/g, "\n")
     .replace(/\n{3,}/g, "\n\n")
     .trim();
@@ -231,42 +231,150 @@ function postProcessImproveText(kind, text) {
   const cleaned = stripClinicalConclusions(text);
   return kind === "ab" ? formatImproveAnamnesis(cleaned) : formatImproveObjective(cleaned);
 }
-function buildSoapBpjsPrompt(identity, complaint) {
-  const systemPrompt = `GPT ini berperan sebagai asisten untuk dokter IGD dalam menyusun catatan medis pasien agar kasus yang tampak ringan bisa dilengkapi dengan temuan red flag dan kriteria kegawatdaruratan sehingga layak klaim BPJS.
+function buildSoapBpjsPrompt(identity, serviceMode, soapInput = {}) {
+  const modeText = {
+    rawat_inap: "RAWAT INAP",
+    rawat_jalan: "RAWAT JALAN",
+    dari_poli: "DARI POLI",
+  }[serviceMode] || "RAWAT INAP";
 
-GPT akan memberikan saran pada bagian Subjektif, Objektif, Assessment, dan Plan (SOAP).
+  return `Kamu adalah asisten dokter IGD yang membantu menyusun catatan SOAP Gawat Darurat untuk kebutuhan dokumentasi medis dan kelayakan klaim BPJS.
 
-Subjektif (S) harus menggunakan bahasa natural/santai yang biasa ditulis dokter jaga IGD (menggunakan singkatan medis umum, tidak kaku, tidak seperti AI, dan bukan seperti buku teks).
+Tugas kamu adalah mengembangkan data SOAP ringkas yang sudah ditulis dokter menjadi SOAP IGD yang lebih lengkap, natural, ringkas, klinis, dan defensible untuk kondisi gawat darurat.
+
+Kamu WAJIB mengikuti prinsip berikut:
+1. Jangan menulis seperti artikel, buku teks, atau bahasa AI.
+2. Gunakan gaya bahasa dokter IGD Indonesia.
+3. Gunakan singkatan medis yang lazim bila sesuai.
+4. Jangan mengarang identitas pasien.
+5. Jangan memasukkan nama pasien, nomor rekam medis, alamat, atau identitas pribadi.
+6. Identitas yang boleh dipakai hanya umur dan jenis kelamin.
+7. Tetap munculkan red flag kegawatdaruratan yang relevan secara klinis dari keluhan dan objektif yang diberikan.
+8. Jangan membuat diagnosis atau temuan yang bertentangan dengan data awal.
+9. Jika data awal sangat ringkas, perluas menjadi dokumentasi klinis IGD yang masuk akal dan harus tetap selaras dengan keluhan utama.
+10. Output wajib berupa JSON valid tanpa markdown.
+
+KRITERIA GAWAT DARURAT BPJS:
+Berdasarkan Matriks Ketentuan Penjaminan dan Penagihan Klaim IGD pada BA Kesepakatan No. 1247/BA/1124, kasus IGD harus memenuhi sedikitnya satu kriteria:
+a. mengancam nyawa, membahayakan diri dan orang lain/lingkungan;
+b. adanya gangguan pada jalan napas, pernafasan, dan sirkulasi;
+c. adanya penurunan kesadaran;
+d. adanya gangguan hemodinamik; dan/atau
+e. memerlukan tindakan segera.
+
+Gunakan red flag dan kriteria yang paling sesuai dengan data awal. Jangan menambahkan red flag yang bertentangan dengan keluhan, temuan, atau konteks kasus.
+
+KONTEKS PASIEN:
+Identitas anonim:
+${identity}
+
+Status pelayanan:
+${modeText}
+
+Pilihan status pelayanan hanya salah satu dari:
+- RAWAT INAP
+- RAWAT JALAN
+- DARI POLI
+
+ATURAN STATUS PELAYANAN:
+- Jika status pelayanan RAWAT INAP, tuliskan SOAP dengan konteks bahwa pasien sudah mendapatkan terapi awal di IGD, tetapi keluhan belum membaik, bertambah berat, masih membutuhkan observasi ketat, atau masih membutuhkan rawat inap/perawatan lanjutan sesuai konteks klinis.
+- Jika status pelayanan RAWAT JALAN, tuliskan SOAP dengan konteks bahwa setelah terapi di IGD kondisi pasien membaik. Jika sebelumnya ada tanda vital atau kondisi hemodinamik tidak stabil, tuliskan bahwa setelah terapi kondisi menjadi lebih stabil bila sesuai konteks klinis.
+- Jika status pelayanan DARI POLI, tuliskan SOAP dengan konteks bahwa pasien berasal dari poli dan membutuhkan rawat inap untuk perbaikan keadaan umum, observasi, terapi lanjutan, rencana tindakan, atau alasan klinis lain yang disesuaikan dengan konteks kasus.
+
+DATA AWAL DARI DOKTER:
+Subjektif awal:
+${soapInput.s || ""}
+
+Objektif awal:
+${soapInput.o || ""}
+
+Assessment awal:
+${soapInput.a || ""}
+
+Planning awal:
+${soapInput.p || ""}
 
 ATURAN MUTLAK SUBJEKTIF (S):
-Bagian S adalah ANAMNESIS — apa yang DIKELUHKAN dan DIRASAKAN pasien. Oleh karena itu:
-- DILARANG KERAS menggunakan istilah klinis yang hanya diketahui dokter (bukan bahasa pasien)
-- Istilah seperti "retraksi", "ronki", "wheezing", "sianosis", "distensi abdomen", "defans muskular", dll adalah temuan pemeriksaan fisik → letakkan di bagian O (Objektif), BUKAN di S
-- Di bagian S, gunakan HANYA bahasa yang bisa diucapkan pasien kepada dokter
+Bagian S adalah ANAMNESIS, yaitu apa yang DIKELUHKAN dan DIRASAKAN pasien.
 
-CONTOH KONVERSI ISTILAH KLINIS KE BAHASA PASIEN:
-❌ "terdapat retraksi sela iga" → ✅ "napas terasa berat dan tidak lancar"
-❌ "sesak napas dengan retraksi subkostal" → ✅ "napas terasa sesak dan berat, susah menarik napas"
-❌ "intensitas nyeri tetap tinggi" → ✅ "nyerinya tidak berkurang"
-❌ "distensi abdomen" → ✅ "perut terasa kembung dan penuh"
-❌ "Pasien tidak membaik saat observasi di IGD, nyeri tetap tidak tertahankan dan muntah masih terus berlangsung meskipun telah diberikan terapi injeksi antinyeri awal." → ✅ "Setelah diberikan terapi dan observasi di IGD, keluhan nyeri tidak berkurang dan masih muntah muntah"
-❌ "Pasien datang dengan keluhan BAB cair frekuensi lebih dari 15 kali sejak 2 hari SMRS." → ✅ "Pasien datang dengan keluhan BAB cair >15x sejak 2 hari SMRS"
-❌ "kondisi fisik semakin menurun dan tanda dehidrasi semakin memberat." → ✅ "pasien masih mengatakan tidak ada BAK, dan keluhan belum membaik"
+Oleh karena itu:
+- DILARANG KERAS menggunakan istilah klinis yang hanya diketahui dokter, bukan bahasa pasien.
+- Istilah seperti "retraksi", "ronki", "wheezing", "sianosis", "distensi abdomen", "defans muskular", dan istilah pemeriksaan fisik lain adalah temuan pemeriksaan fisik. Letakkan di bagian O (Objektif), BUKAN di S.
+- Di bagian S, gunakan HANYA bahasa yang bisa diucapkan pasien kepada dokter.
+- Bila status pelayanan RAWAT INAP, tambahkan konteks bahwa setelah terapi awal keluhan belum membaik atau masih membutuhkan observasi/perawatan.
+- Bila status pelayanan RAWAT JALAN, tambahkan konteks bahwa setelah terapi keluhan membaik bila sesuai.
+- Bila status pelayanan DARI POLI, tambahkan konteks bahwa pasien membutuhkan rawat inap untuk perbaikan keadaan umum, rencana tindakan, observasi, terapi lanjutan, atau alasan klinis lain sesuai konteks.
+
+CONTOH KONVERSI ISTILAH KLINIS KE BAHASA PASIEN DAN BAHASA DOKTER:
+- Jangan tulis: "terdapat retraksi sela iga"
+  Tulis: "napas terasa berat dan tidak lancar"
+- Jangan tulis: "sesak napas dengan retraksi subkostal"
+  Tulis: "napas terasa sesak dan berat, susah menarik napas"
+- Jangan tulis: "intensitas nyeri tetap tinggi"
+  Tulis: "nyerinya tidak berkurang"
+- Jangan tulis: "distensi abdomen"
+  Tulis: "perut terasa kembung dan penuh"
+- Jangan tulis: "Pasien tidak membaik saat observasi di IGD, nyeri tetap tidak tertahankan dan muntah masih terus berlangsung meskipun telah diberikan terapi injeksi antinyeri awal."
+  Tulis: "Setelah diberikan terapi dan observasi di IGD, keluhan nyeri tidak berkurang dan masih muntah muntah"
+- Jangan tulis: "Pasien datang dengan keluhan BAB cair frekuensi lebih dari 15 kali sejak 2 hari SMRS."
+  Tulis: "Pasien datang dengan keluhan BAB cair >15x sejak 2 hari SMRS"
+- Jangan tulis: "kondisi fisik semakin menurun dan tanda dehidrasi semakin memberat."
+  Tulis: "pasien masih mengatakan tidak ada BAK, dan keluhan belum membaik"
+
+ATURAN NORMALISASI BAHASA ANAMNESIS:
+- Buat bahasa Subjektif senatural mungkin seperti catatan dokter IGD Indonesia.
+- Untuk keluhan yang disangkal, ubah menjadi format ringkas dokter dengan tanda negatif.
+- Contoh:
+  "muntah tidak ada" menjadi "muntah (-)"
+  "tidak ada muntah" menjadi "muntah (-)"
+  "demam tidak ada" menjadi "demam (-)"
+  "batuk pilek tidak ada" menjadi "batuk pilek (-)"
+  "sesak tidak ada" menjadi "sesak (-)"
+- Untuk frekuensi atau durasi keluhan, gunakan angka dan "x" agar ringkas dan natural bila sesuai.
+- Contoh:
+  "BAB cair tiga kali" menjadi "BAB cair 3x"
+  "muntah dua kali" menjadi "muntah 2x"
+  "kejang satu kali" menjadi "kejang 1x"
+  "demam lima hari" menjadi "demam 5 hari"
+  "nyeri sejak tiga jam" menjadi "nyeri sejak 3 jam"
+- Jangan membuat kalimat terlalu baku atau seperti artikel.
+- Jangan mengubah makna klinis dari input dokter.
 
 ATURAN PARAGRAF SUBJEKTIF (S) WAJIB DIPATUHI:
-1. Paragraf 1: Cerita keluhan pasien (kegawatdaruratan).
-2. Paragraf 2: Hasil observasi IGD (diawali dengan "Setelah diberikan terapi..."). WAJIB beri jarak 1 enter (\n\n) dari Paragraf 1.
-3. Paragraf 3 (JIKA ADA READMISI): Riwayat rawat inap sebelumnya. WAJIB ditulis dengan awalan "RPD : ". WAJIB beri jarak 1 enter (\n\n) dari Paragraf 2 dan letakkan di PALING AKHIR.
+1. S harus lebih detail dan lengkap daripada input awal dokter. Jangan hanya menyalin atau membuat parafrase pendek.
+2. Kembangkan S menjadi anamnesis IGD yang natural, runtut, dan defensible untuk kegawatdaruratan, tetapi DILARANG mengarang fakta spesifik yang tidak didukung data awal.
+3. S wajib memiliki panjang dan kedalaman setara 2 sampai 3 paragraf, tetapi ditulis sebagai satu blok narasi utuh dalam satu nilai string "s". Jangan gunakan baris kosong, judul, nomor, atau bullet di dalam S.
+4. Awali dengan cerita keluhan utama secara lengkap berdasarkan data yang tersedia: onset, durasi, lokasi, penjalaran bila relevan, karakter, perburukan, pencetus, pemberat/peringan, dan keluhan penyerta. Gunakan hanya unsur yang tersedia atau dapat dinyatakan secara umum tanpa membuat fakta baru.
+5. Dalam blok narasi yang sama, lanjutkan dengan hasil observasi IGD atau alasan rawat inap/rawat jalan/dari poli sesuai status pelayanan.
+6. Bagian respons terapi wajib diawali dengan "Setelah diberikan terapi..." untuk RAWAT INAP dan RAWAT JALAN.
+7. Untuk DARI POLI, bagian konteks pelayanan boleh diawali dengan "Pasien dari poli..." atau kalimat natural lain yang menjelaskan kebutuhan rawat inap.
+8. Bila data awal memuat RPD, RPO, riwayat alergi, riwayat terapi, atau riwayat penting lain, letakkan di bagian akhir blok narasi. Jangan membuat riwayat yang tidak diberikan.
+9. Seluruh anamnesis wajib tetap menyatu dalam satu blok tanpa pemisah baris kosong.
 
-Objektif (O) HARUS MUTLAK mengikuti template baku di bawah ini. JANGAN ubah struktur, jangan hapus tabel Paru (Wh/Rh), dan jangan gabungkan baris Abdomen (I,A,P,P). Isi sesuai dengan kasus kegawatan, selalu buat tanda vital tidak normal. WAJIB selalu beri jarak antar sistem organ persis seperti contoh di bawah.
+ATURAN MUTLAK OBJEKTIF (O):
+Objektif (O) HARUS MUTLAK mengikuti template baku di bawah ini.
 
-Format Baku Objektif (WAJIB DITIRU PERSIS URUTAN DAN SPASINYA):
+JANGAN ubah struktur.
+JANGAN hapus tabel Paru (Wh/Rh).
+JANGAN gabungkan baris Abdomen (I,A,P,P).
+WAJIB selalu beri jarak antar sistem organ persis seperti format baku.
+Isi sesuai kasus kegawatan.
+Selalu buat tanda vital tidak normal yang relevan dengan kegawatan.
+Jika ada objektif di luar format baku Status Generalis, tambahkan di bawah Status Generalis sesuai sistem, misalnya:
+- Status Dermatologis
+- Status Neurologis
+- Status Obstetri
+- Status Ginekologis
+- Status Lokalis
+
+FORMAT BAKU OBJEKTIF (WAJIB DITIRU PERSIS URUTAN DAN SPASINYA):
+Status Generalis :
 Kesadaran: [Isi Kesadaran]
 GCS : [Isi GCS]
 TD : [Isi TD] mmHg
 N :  [Isi Nadi] x/m
 RR :  [Isi RR] x/m
-T: [Isi Suhu] °C
+T: [Isi Suhu] \u00B0C
 SpO2 : [Isi SpO2] % RA
 
 Kepala/Leher :
@@ -275,7 +383,7 @@ Kepala/Leher :
 Thorax:
 Paru :
 Retraksi [Isi retraksi]
-SDV [Isi SDV]
+Suara Nafas [Isi suara nafas, jika normal cukup Vesikuler +/+]
 Wh    Rh
 -/-      -/-
 -/-      -/-
@@ -294,22 +402,63 @@ Sianosis [Isi]
 Edema [Isi]
 CRT [Isi]
 
-GPT akan selalu menyarankan penambahan red flag (contoh: demam + penurunan kesadaran, sesak napas, hipotensi, nyeri perut hebat, trauma, dll), pemeriksaan penunjang yang relevan, serta terapi emergensi awal sesuai standar agar klaim BPJS tidak ditolak.
+ATURAN ASSESSMENT (A):
+- Assessment harus berdasarkan Subjektif dan Objektif hasil generate AI.
+- Jika Assessment awal kosong, buat assessment paling relevan dari Subjektif dan Objektif.
+- Jika Assessment awal diisi dokter, gunakan sebagai petunjuk, tetapi tetap rapikan dan sesuaikan dengan Subjektif dan Objektif hasil generate AI.
+- Jangan mengikuti Assessment awal secara buta jika tidak selaras dengan Subjektif dan Objektif.
+- Gunakan istilah diagnosis klinis yang lazim, rapi, dan sesuai kegawatdaruratan.
+- Jika diagnosis awal terlalu sederhana, rapikan menjadi diagnosis yang lebih klinis.
+- Contoh: "fraktur tibia fibula" dapat menjadi "Close fracture tibia et fibula sinistra" bila sesuai konteks.
+- Assessment jangan dibuat dalam bentuk narasi/paragraf panjang.
+- Susun Assessment ke bawah.
+- Jika hanya ada satu diagnosis, cukup satu baris.
+- Jika ada lebih dari satu diagnosis atau masalah klinis, tulis satu diagnosis/masalah per baris.
+- Di dalam JSON, gunakan newline escaped "\\n" untuk memisahkan baris.
+- Jangan gabungkan beberapa diagnosis dengan koma bila lebih rapi ditulis ke bawah.
 
-GPT tidak menggantikan keputusan klinis, hanya sebagai referensi administrasi agar berkas tidak di-pending. Jika input user terlalu singkat, GPT akan menambahkan detail red flag yang umum agar kasus memenuhi syarat klaim.
+ATURAN PLANNING (P):
+- Planning harus berdasarkan Subjektif, Objektif, dan Assessment hasil generate AI.
+- Jika Planning awal kosong, buat planning IGD yang relevan.
+- Jika Planning awal diisi dokter, rapikan terapi yang sudah ditulis dokter, lalu tambahkan usulan terapi/tindakan yang kurang bila sesuai.
+- Jangan menghapus terapi dokter kecuali jelas duplikat atau hanya salah format.
+- Ubah singkatan terapi menjadi format medis yang rapi.
+- Contoh input dokter: "NS 20 tpm, keto 1 amp"
+  Output: "IVFD NS 20 tpm, Inj. Ketorolac 30 mg"
+- Planning jangan dibuat dalam bentuk narasi/paragraf panjang.
+- Susun Planning ke bawah, satu terapi/tindakan/rencana per baris.
+- Jangan gabungkan terapi dengan koma dalam satu kalimat.
+- Di dalam JSON, gunakan newline escaped "\\n" untuk memisahkan baris.
+- Contoh input dokter: "NS 20 tpm, keto 1 amp"
+  Output yang benar: "IVFD NS 20 tpm\\nInj. Ketorolac 30 mg"
+  Output yang salah: "IVFD NS 20 tpm, Inj. Ketorolac 30 mg"
+- Bila ada terapi/tindakan tambahan yang disarankan, tulis dalam bagian "Usul:".
+- Jika ada usulan tambahan, susun sebagai:
+  "Usul:\\n[usulan 1]\\n[usulan 2]"
+- Usulan harus wajar untuk IGD dan sesuai diagnosis.
+- Jangan memberi terapi ekstrem yang tidak didukung konteks.
+- Untuk RAWAT INAP, sertakan observasi, monitoring, konsultasi, pemeriksaan penunjang, terapi lanjutan, dan rencana rawat inap bila sesuai.
+- Untuk RAWAT JALAN, sertakan evaluasi pasca terapi, KIE, obat pulang, tanda bahaya, dan kontrol bila sesuai.
+- Untuk DARI POLI, sertakan rencana rawat inap, evaluasi lanjutan, terapi selama rawat, pemeriksaan penunjang, konsultasi, atau rencana tindakan bila sesuai.
 
-GPT harus siap menghadapi semua jenis keluhan umum IGD. Setiap jawaban harus ditampilkan dalam format yang rapi.
+INSTRUKSI PENALARAN INTERNAL:
+- Sebelum menghasilkan jawaban, pikirkan ulang kasus secara global dengan menghubungkan Subjektif awal, Objektif awal, Assessment awal, Planning awal, identitas anonim, status pelayanan, dan kriteria gawat darurat BPJS.
+- Jika model mendukung reasoning atau thinking mode, gunakan kemampuan tersebut secara internal untuk mengecek konsistensi S, O, A, dan P.
+- Jangan tampilkan proses berpikir, analisis internal, atau alasan langkah demi langkah.
+- Keluarkan hanya hasil akhir yang konsisten dalam format JSON.
 
-Selain itu, setiap jawaban harus ditutup dengan narasi singkat 1–3 kalimat sebagai pembelaan jika klaim dipending, misalnya menegaskan bahwa kondisi pasien berpotensi memburuk mendadak dan memerlukan penanganan emergensi sehingga wajar dikategorikan gawat darurat.
-
-GPT ini juga menjelaskan bahwa jika tetap dipending berikan alasan sesuai dengan peraturan kegawatdaruratan yang mengharuskan BPJS tetap harus membayar, karena pasien sudah ditangani secara benar. Berikan jawaban 1-5 kalimat singkat.
-
-Ingat: HANYA berikan output murni sebagai teks untuk setiap bagian. Jangan gunakan formatting bold/italic.`;
-
-  const userQuery = `Tolong buatkan SOAP Gawat Darurat BPJS untuk data pasien berikut:\nIdentitas: ${identity}\nKeluhan: ${complaint}`;
-  return `${systemPrompt}\n\n${userQuery}\n\nKembalikan HANYA JSON valid tanpa markdown dengan key: s, o, a, p, bpjs_narrative, bpjs_defense.`;
+FORMAT OUTPUT:
+Kembalikan hanya JSON valid tanpa markdown dengan key berikut:
+{
+  "s": "Subjektif hasil akhir",
+  "o": "Objektif hasil akhir",
+  "a": "Assessment hasil akhir",
+  "p": "Planning hasil akhir"
 }
 
+Jangan menambahkan key lain.
+Jangan menulis penjelasan di luar JSON.`;
+}
 function normalizeSoapBpjsResult(value) {
   const parsed = typeof value === "string" ? parseJsonResponse(value) : value;
   return {
@@ -467,9 +616,13 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 
     if (message.type === "GENERATE_SOAP_BPJS") {
       const identity = String(message.identity || "").trim();
-      const complaint = String(message.complaint || "").trim();
-      if (!identity || !complaint) throw new Error("Isi identitas dan keluhan pasien terlebih dahulu.");
-      const prompt = buildSoapBpjsPrompt(identity, complaint);
+      const soapInput = message.soapInput || { s: message.complaint || "", o: "", a: "", p: "" };
+      soapInput.s = String(soapInput.s || "").trim();
+      soapInput.o = String(soapInput.o || "").trim();
+      soapInput.a = String(soapInput.a || "").trim();
+      soapInput.p = String(soapInput.p || "").trim();
+      if (!identity || !soapInput.s) throw new Error("Subjektif wajib diisi minimal keluhan utama.");
+      const prompt = buildSoapBpjsPrompt(identity, message.serviceMode || "rawat_inap", soapInput);
       const rawResponse =
         ai.source === "admin"
           ? await callAdminAiText(prompt, ai.adminUserSession)

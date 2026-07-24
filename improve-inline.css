@@ -259,86 +259,277 @@
   gap: 8px;
   margin: 8px 0 12px;
   max-width: 720px;
-  padding: 10px;
+  padding: 10px 42px 10px 10px;
+  position: relative;
 }
 
 .rmr-soap-gen-panel[hidden] {
   display: none;
 }
+.rmr-soap-gen-close {
+  align-items: center;
+  appearance: none;
+  background: #dc2626;
+  border: 0;
+  border-radius: 4px;
+  color: #ffffff;
+  cursor: pointer;
+  display: flex;
+  font-size: 20px;
+  height: 26px;
+  justify-content: center;
+  line-height: 1;
+  padding: 0;
+  position: absolute;
+  right: 8px;
+  top: 8px;
+  width: 26px;
+}
+
+.rmr-soap-gen-close:hover {
+  background: #b91c1c;
+}
+
 .rmr-soap-gen-identity {
   color: #1f2937;
   font-size: 12px;
   font-weight: 700;
 }
 
-.rmr-soap-preview-modal {
-  align-items: center;
-  background: rgba(15, 23, 42, 0.55);
+.rmr-soap-help-trigger,
+.rmr-soap-undo {
+  appearance: none;
+  background: #ffffff;
+  border: 1px solid #111111;
+  border-radius: 999px;
+  color: #111111;
+  cursor: pointer;
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-size: 12px;
+  font-weight: 800;
+  line-height: 1;
+  margin-left: 6px;
+  min-height: 22px;
+  min-width: 22px;
+  padding: 4px 6px;
+}
+
+.rmr-soap-undo {
+  border-radius: 4px;
+  margin: 2px 0 3px 6px;
+}
+
+.rmr-soap-help-popover,
+.rmr-soap-undo-popover {
+  background: #ffffff;
+  border: 1px solid #111111;
+  border-radius: 8px;
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.22);
+  box-sizing: border-box;
+  color: #111111;
   display: flex;
-  inset: 0;
-  justify-content: center;
-  padding: 16px;
+  flex-direction: column;
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-size: 13px;
+  gap: 8px;
+  line-height: 1.45;
+  padding: 10px;
   position: fixed;
   z-index: 2147483647;
 }
 
-.rmr-soap-preview-dialog {
-  background: #ffffff;
-  font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  border-radius: 8px;
-  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.28);
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  max-height: 92vh;
-  max-width: 760px;
+.rmr-soap-help-popover {
+  max-height: calc(100vh - 16px);
   overflow: auto;
-  padding: 14px;
-  width: min(760px, 100%);
+  width: min(520px, calc(100vw - 16px));
 }
 
-.rmr-soap-preview-title {
+.rmr-soap-help-warning {
+  background: #b91c1c;
+  border-radius: 6px;
+  color: #ffffff;
+  font-weight: 800;
+  padding: 10px;
+}
+
+.rmr-soap-help-card {
+  background: #f5f5f5;
+  border: 1px solid #d4d4d4;
+  border-radius: 6px;
+  padding: 10px;
+}
+
+.rmr-soap-help-card p {
+  margin: 7px 0 0;
+}
+
+.rmr-soap-help-card ol {
+  margin: 7px 0 0;
+  padding-left: 24px;
+}
+
+.rmr-soap-help-card li + li {
+  margin-top: 4px;
+}
+
+.rmr-soap-undo-popover {
+  height: min(260px, calc(100vh - 16px));
+  max-height: calc(100vh - 16px);
+  max-width: calc(100vw - 16px);
+  min-height: 190px;
+  min-width: min(320px, calc(100vw - 16px));
+  overflow: auto;
+  resize: both;
+  width: min(620px, calc(100vw - 16px));
+}
+
+.rmr-soap-undo-header {
+  cursor: move;
+  font-weight: 800;
+  touch-action: none;
+  user-select: none;
+}
+
+.rmr-soap-undo-popover textarea {
+  border: 1px solid #a3a3a3;
+  border-radius: 6px;
+  box-sizing: border-box;
   color: #111111;
-  font-size: 16px;
+  flex: 1;
+  font: inherit;
+  min-height: 90px;
+  padding: 8px;
+  resize: none;
+  width: 100%;
+}
+
+.rmr-soap-toast {
+  background: #111111;
+  border-radius: 6px;
+  bottom: 18px;
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.25);
+  color: #ffffff;
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-size: 13px;
+  font-weight: 700;
+  left: 50%;
+  padding: 10px 14px;
+  position: fixed;
+  transform: translateX(-50%);
+  z-index: 2147483647;
+}
+
+.rmr-soap-result-backdrop {
+  align-items: center;
+  background: rgba(0, 0, 0, 0.45);
+  display: flex;
+  inset: 0;
+  justify-content: center;
+  padding: 18px;
+  position: fixed;
+  z-index: 2147483647;
+}
+
+.rmr-soap-result-modal {
+  background: #ffffff;
+  border-radius: 8px;
+  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.28);
+  box-sizing: border-box;
+  color: #111111;
+  display: flex;
+  flex-direction: column;
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  gap: 12px;
+  max-height: calc(100vh - 36px);
+  max-width: 960px;
+  overflow: auto;
+  padding: 14px;
+  width: min(960px, calc(100vw - 36px));
+}
+
+.rmr-soap-result-section {
+  border: 1px solid #d4d4d4;
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.rmr-soap-result-header {
+  align-items: center;
+  background: #f5f5f5;
+  display: flex;
+  gap: 10px;
+  justify-content: space-between;
+  padding: 8px 10px;
+}
+
+.rmr-soap-copy {
+  appearance: none;
+  background: #111111;
+  border: 1px solid #111111;
+  border-radius: 5px;
+  color: #ffffff;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 800;
+  line-height: 1;
+  min-height: 28px;
+  min-width: 34px;
+}
+
+.rmr-soap-copy:hover {
+  background: #ffffff;
+  color: #111111;
+}
+
+.rmr-soap-result-section pre {
+  box-sizing: border-box;
+  font: 14px/1.5 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  margin: 0;
+  min-height: 64px;
+  padding: 10px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.rmr-soap-result-nav {
+  align-items: center;
+  display: flex;
+  gap: 2px;
+}
+
+.rmr-soap-result-nav strong {
+  margin-right: 4px;
+}
+
+.rmr-soap-result-nav button {
+  appearance: none;
+  background: transparent;
+  border: 0;
+  color: #111111;
+  cursor: pointer;
+  font: inherit;
+  font-weight: 800;
+  padding: 0 2px;
+}
+
+.rmr-soap-result-nav button:disabled {
+  cursor: not-allowed;
+  opacity: 0.35;
+}
+
+.rmr-soap-result-counter {
   font-weight: 800;
 }
 
-.rmr-soap-preview-next {
-  align-items: center;
-  display: flex;
-  gap: 8px;
-}
-
-.rmr-soap-preview-next[hidden],
-.rmr-soap-preview-next span[hidden],
-.rmr-soap-preview-dialog [hidden] {
-  display: none;
-}
-
-.rmr-soap-preview-next span {
-  color: #525252;
-  font-size: 12px;
-  font-weight: 700;
-}
-
-.rmr-soap-preview-dialog label {
-  color: #111111;
-  display: flex;
-  flex-direction: column;
-  font-size: 12px;
-  font-weight: 700;
-  gap: 4px;
-}
-
-.rmr-soap-preview-dialog textarea {
-  border: 1px solid #a3a3a3;
+.rmr-soap-result-body {
+  border: 1px solid #d4d4d4;
   border-radius: 6px;
-  color: #111111;
-  font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  font-size: 14px;
-  font-weight: 400;
-  line-height: 1.55;
-  padding: 8px 10px;
-  resize: vertical;
-  width: 100%;
+  box-sizing: border-box;
+  font: 14px/1.5 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  margin: 0;
+  min-height: min(420px, 55vh);
+  overflow: auto;
+  padding: 10px;
+  white-space: pre-wrap;
+  word-break: break-word;
 }

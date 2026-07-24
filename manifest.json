@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Resume Medis Helper RSBHHB",
-  "version": "1.0.4",
+  "version": "1.1",
   "description": "Side panel untuk membantu user membuat/mereview resume medis dengan menggunakan AI",
   "permissions": ["sidePanel", "storage", "activeTab", "scripting"],
   "host_permissions": ["<all_urls>"],

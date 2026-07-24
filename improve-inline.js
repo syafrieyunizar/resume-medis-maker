@@ -398,15 +398,137 @@
     };
   }
 
-  function applySoapResult(result) {
+  function getSoapSnapshot(fields = getSoapFields()) {
+    return {
+      s: fields.subjektif?.value || "",
+      o: fields.objektif?.value || "",
+      a: fields.assessment?.value || "",
+      p: fields.planning?.value || "",
+    };
+  }
+
+  function collectSoapInput(fields = getSoapFields()) {
+    const snapshot = getSoapSnapshot(fields);
+    return {
+      s: snapshot.s.trim(),
+      o: snapshot.o.trim(),
+      a: snapshot.a.trim(),
+      p: snapshot.p.trim(),
+    };
+  }
+
+  function clearSoapUndoButtons() {
+    document.querySelectorAll(".rmr-soap-undo, .rmr-soap-undo-popover").forEach((element) => element.remove());
+  }
+
+  function showSoapToast(message) {
+    document.querySelector(".rmr-soap-toast")?.remove();
+    const toast = document.createElement("div");
+    toast.className = "rmr-soap-toast";
+    toast.textContent = message;
+    document.body.append(toast);
+    setTimeout(() => toast.remove(), 1800);
+  }
+
+  async function copySoapText(text) {
+    try {
+      await navigator.clipboard.writeText(text || "");
+    } catch (_error) {
+      const textarea = document.createElement("textarea");
+      textarea.value = text || "";
+      textarea.style.cssText = "position:fixed;left:-9999px;top:0";
+      document.body.append(textarea);
+      textarea.select();
+      document.execCommand("copy");
+      textarea.remove();
+    }
+    showSoapToast("Copied");
+  }
+
+  function showSoapUndoPopover(button, value, textarea, label) {
+    const current = document.querySelector(".rmr-soap-undo-popover");
+    if (current?.dataset.rmrUndoKey === button.dataset.rmrUndoKey) {
+      current.remove();
+      return;
+    }
+    current?.remove();
+    const popover = document.createElement("div");
+    popover.className = "rmr-soap-undo-popover";
+    popover.dataset.rmrUndoKey = button.dataset.rmrUndoKey;
+    const title = document.createElement("div");
+    title.className = "rmr-soap-undo-header";
+    title.textContent = `${label} sebelumnya`;
+    const preview = document.createElement("textarea");
+    preview.readOnly = true;
+    preview.rows = 5;
+    preview.value = value || "";
+    const actions = document.createElement("div");
+    actions.className = "rmr-inline-actions";
+    const restore = createButton("Pulihkan", "rmr-inline-btn-primary");
+    const close = createButton("Tutup", "rmr-inline-btn-secondary");
+    actions.append(restore, close);
+    popover.append(title, preview, actions);
+    document.body.append(popover);
+    const rect = button.getBoundingClientRect();
+    popover.style.left = `${Math.max(8, Math.min(rect.left, window.innerWidth - popover.offsetWidth - 8))}px`;
+    popover.style.top = `${Math.max(8, Math.min(rect.bottom + 6, window.innerHeight - popover.offsetHeight - 8))}px`;
+    title.addEventListener("pointerdown", (event) => {
+      const startRect = popover.getBoundingClientRect();
+      const offsetX = event.clientX - startRect.left;
+      const offsetY = event.clientY - startRect.top;
+      title.setPointerCapture(event.pointerId);
+      const move = (moveEvent) => {
+        popover.style.left = `${Math.max(0, Math.min(moveEvent.clientX - offsetX, window.innerWidth - popover.offsetWidth))}px`;
+        popover.style.top = `${Math.max(0, Math.min(moveEvent.clientY - offsetY, window.innerHeight - popover.offsetHeight))}px`;
+      };
+      const stop = () => title.removeEventListener("pointermove", move);
+      title.addEventListener("pointermove", move);
+      title.addEventListener("pointerup", stop, { once: true });
+      title.addEventListener("pointercancel", stop, { once: true });
+    });
+    restore.addEventListener("click", () => {
+      setValue(textarea, value || "");
+      button.remove();
+      popover.remove();
+      showSoapToast("Sudah dipulihkan");
+    });
+    close.addEventListener("click", () => popover.remove());
+  }
+  function addSoapUndoButtons(snapshot, result) {
+    const fields = getSoapFields();
+    [
+      ["s", fields.subjektif, "Subjektif"],
+      ["o", fields.objektif, "Objektif"],
+      ["a", fields.assessment, "Assessment"],
+      ["p", fields.planning, "Planning"],
+    ].forEach(([key, textarea, label]) => {
+      if (!textarea || String(snapshot[key] || "") === String(result[key] || "")) return;
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "rmr-soap-undo";
+      button.textContent = "\u21B6";
+      button.title = `Lihat ${label} sebelumnya`;
+      button.setAttribute("aria-label", `Lihat ${label} sebelumnya`);
+      button.dataset.rmrUndoKey = key;
+      button.addEventListener("click", (event) => {
+        event.preventDefault();
+        showSoapUndoPopover(button, snapshot[key], textarea, label);
+      });
+      textarea.insertAdjacentElement("beforebegin", button);
+    });
+  }
+
+  function applySoapResult(result, snapshot = null) {
     const fields = getSoapFields();
     if (!fields.subjektif || !fields.objektif || !fields.assessment || !fields.planning) {
       throw new Error("Field SOAP halaman tidak ditemukan.");
     }
+    clearSoapUndoButtons();
     setValue(fields.subjektif, result.s || "");
     setValue(fields.objektif, result.o || "");
     setValue(fields.assessment, result.a || "");
     setValue(fields.planning, result.p || "");
+    if (snapshot) addSoapUndoButtons(snapshot, result);
   }
 
   function getSoapStorageKey() {
@@ -417,59 +539,120 @@
     return chrome.storage.local.set({ [getSoapStorageKey()]: result });
   }
 
-  async function loadSoapResult() {
-    return (await chrome.storage.local.get(getSoapStorageKey()))[getSoapStorageKey()] || null;
+  function loadSoapResult() {
+    return new Promise((resolve) => {
+      chrome.storage.local.get(getSoapStorageKey(), (data) => resolve(data[getSoapStorageKey()] || null));
+    });
   }
 
-  function showSoapPreview(result, onApply) {
-    document.querySelector(".rmr-soap-preview-modal")?.remove();
+  function showSoapResultModal(result) {
+    if (!result) {
+      showSoapToast("Belum ada hasil SOAP");
+      return;
+    }
+    const parts = [
+      ["Subjektif", "s"],
+      ["Objektif", "o"],
+      ["Assessment", "a"],
+      ["Planning", "p"],
+    ];
+    let index = 0;
+    document.querySelector(".rmr-soap-result-backdrop")?.remove();
+    const backdrop = document.createElement("div");
+    backdrop.className = "rmr-soap-result-backdrop";
     const modal = document.createElement("div");
-    modal.className = "rmr-soap-preview-modal";
-    modal.innerHTML = `
-      <div class="rmr-soap-preview-dialog" role="dialog" aria-modal="true" aria-label="Preview SOAP">
-        <div class="rmr-soap-preview-title">Preview SOAP</div>
-        <label>S<textarea rows="5" data-soap-key="s"></textarea></label>
-        <label>O<textarea rows="7" data-soap-key="o"></textarea></label>
-        <div class="rmr-soap-preview-next">
-          <button type="button" class="rmr-inline-btn rmr-inline-btn-primary" data-soap-next>Generate A dan P</button>
-          <span data-soap-loading hidden>Menyusun A dan P...</span>
-        </div>
-        <label data-soap-ap hidden>A<textarea rows="3" data-soap-key="a"></textarea></label>
-        <label data-soap-ap hidden>P<textarea rows="4" data-soap-key="p"></textarea></label>
-        <div class="rmr-inline-actions">
-          <button type="button" class="rmr-inline-btn rmr-inline-btn-primary" data-soap-apply hidden>OK, masukkan</button>
-          <button type="button" class="rmr-inline-btn rmr-inline-btn-secondary" data-soap-cancel>Batal</button>
-        </div>
-      </div>`;
-    document.body.append(modal);
-    ["s", "o", "a", "p"].forEach((key) => {
-      const textarea = modal.querySelector(`[data-soap-key="${key}"]`);
-      textarea.value = result[key] || "";
-      autoGrowTextarea(textarea);
+    modal.className = "rmr-soap-result-modal";
+    const header = document.createElement("div");
+    header.className = "rmr-soap-result-header";
+    const nav = document.createElement("div");
+    nav.className = "rmr-soap-result-nav";
+    const prev = document.createElement("button");
+    prev.type = "button";
+    prev.textContent = "<";
+    const labelTitle = document.createElement("strong");
+    const counter = document.createElement("span");
+    counter.className = "rmr-soap-result-counter";
+    const next = document.createElement("button");
+    next.type = "button";
+    next.textContent = ">";
+    const copy = document.createElement("button");
+    copy.type = "button";
+    copy.className = "rmr-soap-copy";
+    copy.textContent = "\u2398";
+    const body = document.createElement("pre");
+    body.className = "rmr-soap-result-body";
+    const close = createButton("Tutup", "rmr-inline-btn-secondary");
+    const render = () => {
+      const [label, key] = parts[index];
+      labelTitle.textContent = label;
+      counter.textContent = `${index + 1}/4`;
+      body.textContent = result[key] || "";
+      copy.title = `Copy ${label}`;
+      copy.setAttribute("aria-label", `Copy ${label}`);
+      prev.disabled = index === 0;
+      next.disabled = index === parts.length - 1;
+    };
+    prev.addEventListener("click", () => {
+      index = Math.max(0, index - 1);
+      render();
     });
-    modal.querySelector("[data-soap-cancel]").addEventListener("click", () => modal.remove());
-    modal.querySelector("[data-soap-next]").addEventListener("click", (event) => {
-      const button = event.currentTarget;
-      const loading = modal.querySelector("[data-soap-loading]");
-      button.disabled = true;
-      loading.hidden = false;
-      setTimeout(() => {
-        modal.querySelectorAll("[data-soap-ap]").forEach((element) => (element.hidden = false));
-        modal.querySelector("[data-soap-apply]").hidden = false;
-        modal.querySelector(".rmr-soap-preview-next").hidden = true;
-        queueAutoGrowTextareas(modal);
-      }, 700);
+    next.addEventListener("click", () => {
+      index = Math.min(parts.length - 1, index + 1);
+      render();
     });
-    modal.querySelector("[data-soap-apply]").addEventListener("click", async () => {
-      const edited = { ...result };
-      ["s", "o", "a", "p"].forEach((key) => {
-        edited[key] = modal.querySelector(`[data-soap-key="${key}"]`).value.trim();
-      });
-      await onApply(edited);
-      modal.remove();
+    copy.addEventListener("click", () => copySoapText(result[parts[index][1]] || ""));
+    close.addEventListener("click", () => backdrop.remove());
+    backdrop.addEventListener("click", (event) => {
+      if (event.target === backdrop) backdrop.remove();
     });
+    nav.append(labelTitle, prev, counter, next);
+    header.append(nav, copy);
+    modal.append(header, body, close);
+    backdrop.append(modal);
+    document.body.append(backdrop);
+    render();
   }
 
+  function showMagicSoapHelp(anchor) {
+    const current = document.querySelector(".rmr-soap-help-popover");
+    if (current) {
+      current.remove();
+      return;
+    }
+    const popover = document.createElement("div");
+    popover.className = "rmr-soap-help-popover";
+    popover.innerHTML = `
+      <div class="rmr-soap-help-warning">\u26A0\uFE0F Semua keputusan klinis tetap ditangan dokter yang merawat</div>
+      <section class="rmr-soap-help-card">
+        <strong>Apa fungsi Magic SOAP?</strong>
+        <p>Magic SOAP membaca S/O/A/P yang sudah ditulis ringkas, lalu mengembangkannya menjadi SOAP IGD BPJS dengan red flag kegawatdaruratan.</p>
+        <p>Pilih Rawat inap bila setelah terapi IGD keluhan belum membaik, Rawat jalan bila membaik setelah terapi, atau Dari poli bila pasien memerlukan rawat inap maupun rencana tindakan.</p>
+        <p>A boleh kosong dan akan dibuat berdasarkan S dan O hasil AI. P boleh kosong; bila diisi, terapi dokter dirapikan dan dilengkapi dengan usulan bila sesuai.</p>
+      </section>
+      <section class="rmr-soap-help-card">
+        <strong>Aturan BPJS IGD</strong>
+        <p>Berdasarkan Matriks Ketentuan Penjaminan dan Penagihan Klaim IGD pada BA Kesepakatan No. 1247/BA/1124, kasus IGD harus memenuhi salah satu kriteria gawat darurat:</p>
+        <ol type="a">
+          <li>Mengancam nyawa, membahayakan diri dan orang lain/lingkungan.</li>
+          <li>Adanya gangguan pada jalan napas, pernafasan, dan sirkulasi.</li>
+          <li>Adanya penurunan kesadaran.</li>
+          <li>Adanya gangguan hemodinamik; dan/atau.</li>
+          <li>Memerlukan tindakan segera.</li>
+        </ol>
+      </section>
+      <section class="rmr-soap-help-card">
+        <strong>Contoh</strong>
+        <p><b>Input:</b> S nyeri kaki kiri; O kaki bengkak (+); A fraktur tibia fibula; P NS 20 tpm, keto 1 amp.</p>
+        <p><b>Hasil:</b> A Close fracture tibia et fibula sinistra; P IVFD NS 20 tpm, Inj. Ketorolac 30 mg; Usul: KIE tindakan/operasi.</p>
+      </section>`;
+    const close = createButton("Tutup", "rmr-inline-btn-secondary");
+    popover.append(close);
+    document.body.append(popover);
+    const rect = anchor.getBoundingClientRect();
+    popover.style.left = `${Math.max(8, Math.min(rect.left, window.innerWidth - popover.offsetWidth - 8))}px`;
+    popover.style.top = `${Math.max(8, Math.min(rect.bottom + 6, window.innerHeight - popover.offsetHeight - 8))}px`;
+    close.addEventListener("click", () => popover.remove());
+  }
   function createSoapGeneratorUi() {
     const title = document.querySelector("#muncul1");
     if (!title || title.dataset.rmrSoapGeneratorReady === "1") return;
@@ -479,99 +662,131 @@
     const trigger = document.createElement("button");
     trigger.type = "button";
     trigger.className = "rmr-soap-gen-trigger";
-    trigger.textContent = "SOAP generator";
+    trigger.textContent = "Magic SOAP \u{1F9E0}";
     title.insertAdjacentElement("afterend", trigger);
+
+    const help = document.createElement("button");
+    help.type = "button";
+    help.className = "rmr-soap-help-trigger";
+    help.textContent = "?";
+    help.setAttribute("aria-label", "Bantuan Magic SOAP");
+    trigger.insertAdjacentElement("afterend", help);
 
     const panel = document.createElement("div");
     panel.className = "rmr-soap-gen-panel";
     panel.hidden = true;
     panel.innerHTML = `
+      <button type="button" class="rmr-soap-gen-close" data-rmr-soap-close aria-label="Tutup">\u00D7</button>
       <div class="rmr-soap-gen-identity" data-rmr-soap-identity>Identitas anonim: -</div>
-      <textarea class="rmr-inline-input" rows="3" data-rmr-soap-complaint placeholder="Keluhan pasien"></textarea>
       <div class="rmr-inline-status" data-rmr-soap-status hidden></div>
       <div class="rmr-inline-actions">
-        <button type="button" class="rmr-inline-btn rmr-inline-btn-primary" data-rmr-soap-generate>Buat SOAP</button>
-        <button type="button" class="rmr-inline-btn rmr-inline-btn-secondary" data-rmr-soap-preview hidden>Preview</button>
-        <button type="button" class="rmr-inline-btn rmr-inline-btn-secondary" data-rmr-soap-close>Tutup</button>
+        <button type="button" class="rmr-inline-btn rmr-inline-btn-primary" data-rmr-soap-mode="rawat_inap">Rawat inap</button>
+        <button type="button" class="rmr-inline-btn rmr-inline-btn-primary" data-rmr-soap-mode="rawat_jalan">Rawat jalan</button>
+        <button type="button" class="rmr-inline-btn rmr-inline-btn-primary" data-rmr-soap-mode="dari_poli">Dari poli</button>
+        <button type="button" class="rmr-inline-btn rmr-inline-btn-primary" data-rmr-soap-regenerate hidden>Generate ulang</button>
+        <button type="button" class="rmr-inline-btn rmr-inline-btn-primary" data-rmr-soap-preview hidden>Preview</button>
       </div>`;
     (title.closest(".box-rm03biru") || title.parentElement || title).insertAdjacentElement("afterend", panel);
 
     const identity = panel.querySelector("[data-rmr-soap-identity]");
-    const complaint = panel.querySelector("[data-rmr-soap-complaint]");
     const status = panel.querySelector("[data-rmr-soap-status]");
-    const generate = panel.querySelector("[data-rmr-soap-generate]");
-    const previewSaved = panel.querySelector("[data-rmr-soap-preview]");
-
-    const refreshSavedPreview = async () => {
-      previewSaved.hidden = !(await loadSoapResult());
-    };
+    const modeButtons = [...panel.querySelectorAll("[data-rmr-soap-mode]")];
+    const regenerate = panel.querySelector("[data-rmr-soap-regenerate]");
+    const preview = panel.querySelector("[data-rmr-soap-preview]");
 
     const showStatus = (message, kind) => {
       status.hidden = false;
       status.className = `rmr-inline-status ${kind ? `is-${kind}` : ""}`.trim();
       status.textContent = message;
     };
+    let loadingTimer = null;
+    const stopLoadingTimer = () => {
+      clearInterval(loadingTimer);
+      loadingTimer = null;
+    };
+    const startLoadingTimer = () => {
+      const started = Date.now();
+      const render = () => {
+        const seconds = Math.floor((Date.now() - started) / 1000);
+        showStatus(
+          `Membuat Magic SOAP... ${seconds} detik. Proses 30-180 detik tergantung panjang data dan kecepatan provider.`,
+          "loading"
+        );
+      };
+      stopLoadingTimer();
+      render();
+      loadingTimer = setInterval(render, 1000);
+    };
 
-    trigger.addEventListener("click", () => {
+    trigger.addEventListener("click", async () => {
       panel.hidden = !panel.hidden;
+      if (panel.hidden) stopLoadingTimer();
       identity.textContent = `Identitas anonim: ${getAnonymousPatientIdentity() || "tidak terbaca"}`;
-      refreshSavedPreview();
-      if (!panel.hidden) complaint.focus();
+      if (!panel.hidden) preview.hidden = !(await loadSoapResult());
     });
+    help.addEventListener("click", () => showMagicSoapHelp(help));
     panel.querySelector("[data-rmr-soap-close]").addEventListener("click", () => {
+      stopLoadingTimer();
       panel.hidden = true;
       status.hidden = true;
     });
-    previewSaved.addEventListener("click", async () => {
-      const saved = await loadSoapResult();
-      if (!saved) return;
-      showSoapPreview(saved, async (edited) => {
-        await saveSoapResult(edited);
-        applySoapResult(edited);
-        showStatus("SOAP berhasil dimasukkan ke halaman.", "success");
-      });
+    regenerate.addEventListener("click", () => {
+      stopLoadingTimer();
+      regenerate.hidden = true;
+      status.hidden = true;
+      modeButtons.forEach((item) => (item.disabled = false));
     });
-    generate.addEventListener("click", async () => {
+    preview.addEventListener("click", async () => showSoapResultModal(await loadSoapResult()));
+    panel.addEventListener("click", async (event) => {
+      const button = event.target.closest?.("[data-rmr-soap-mode]");
+      if (!button) return;
+      const fields = getSoapFields();
       const patientIdentity = getAnonymousPatientIdentity();
-      const patientComplaint = complaint.value.trim();
       if (!patientIdentity) {
         showStatus("Umur/jenis kelamin pasien tidak terbaca dari header.", "error");
         return;
       }
-      if (!patientComplaint) {
-        showStatus("Isi keluhan pasien terlebih dahulu.", "error");
+      if (!fields.subjektif || !fields.objektif || !fields.assessment || !fields.planning) {
+        showStatus("Field SOAP halaman tidak ditemukan.", "error");
         return;
       }
-      generate.disabled = true;
-      showStatus("Membuat SOAP BPJS...", "loading");
+      const soapInput = collectSoapInput(fields);
+      if (!soapInput.s) {
+        showStatus("Subjektif wajib diisi minimal keluhan utama.", "error");
+        return;
+      }
+      if (!soapInput.o && !confirm("Objektif kosong. Magic SOAP akan membuat objektif terarah yang wajib diverifikasi dokter. Lanjutkan?")) return;
+      const snapshot = getSoapSnapshot(fields);
+      modeButtons.forEach((item) => (item.disabled = true));
+      regenerate.hidden = true;
+      startLoadingTimer();
       try {
         const response = await chrome.runtime.sendMessage({
           type: "GENERATE_SOAP_BPJS",
           identity: patientIdentity,
-          complaint: patientComplaint,
+          serviceMode: button.dataset.rmrSoapMode,
+          soapInput,
         });
         if (!response?.ok) throw new Error(response?.error || "Gagal membuat SOAP.");
         const result = response.result || {};
         await saveSoapResult(result);
-        await refreshSavedPreview();
-        showSoapPreview(result, async (edited) => {
-          await saveSoapResult(edited);
-          applySoapResult(edited);
-          showStatus("SOAP berhasil dimasukkan ke halaman.", "success");
-        });
-        showStatus("Preview SOAP siap diedit.", "success");
+        applySoapResult(result, snapshot);
+        regenerate.hidden = false;
+        preview.hidden = false;
+        stopLoadingTimer();
+        status.hidden = true;
+        panel.hidden = true;
       } catch (error) {
+        stopLoadingTimer();
         showStatus(error instanceof Error ? error.message : String(error), "error");
-      } finally {
-        generate.disabled = false;
+        modeButtons.forEach((item) => (item.disabled = false));
       }
     });
   }
-
   function boot() {
     createSoapGeneratorUi();
-    if (!isEligiblePage()) return;
-    TARGETS.forEach(createFieldUi);
+    // Inline improve ab/ae dinonaktifkan; workflow sekarang lewat Magic SOAP.
+    return;
   }
 
 
