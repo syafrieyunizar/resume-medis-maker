@@ -562,3 +562,52 @@
   white-space: pre-wrap;
   word-break: break-word;
 }
+
+.rmr-bpjs-trigger {
+  appearance: none;
+  background: #111111;
+  border: 1px solid #111111;
+  border-radius: 4px;
+  color: #ffffff;
+  cursor: pointer;
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-size: 12px;
+  font-weight: 700;
+  margin-left: 8px;
+  padding: 4px 8px;
+  vertical-align: 1px;
+}
+
+.rmr-bpjs-trigger:hover {
+  background: #ffffff;
+  color: #111111;
+}
+
+.rmr-bpjs-modal label {
+  display: flex;
+  flex-direction: column;
+  font-size: 13px;
+  font-weight: 800;
+  gap: 6px;
+}
+
+.rmr-bpjs-modal textarea {
+  border: 1px solid #a3a3a3;
+  border-radius: 6px;
+  box-sizing: border-box;
+  color: #111111;
+  font: 14px/1.45 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  padding: 9px;
+  resize: vertical;
+  width: 100%;
+}
+
+.rmr-bpjs-warning-card {
+  background: #b91c1c;
+  border-radius: 6px;
+  color: #ffffff;
+  font: 13px/1.45 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-weight: 400;
+  padding: 12px;
+  white-space: pre-wrap;
+}

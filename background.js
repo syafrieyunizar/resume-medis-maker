@@ -180,7 +180,7 @@ function parseJsonResponse(text) {
 function normalizeSpacing(text) {
   return String(text || "")
     .replace(/\r/g, "")
-    .replace(/[Ã¢â€ â€™Ã¢â€¡â€™Ã¢Å¾â€Ã¢Å¾Å“Ã¢Å¾ÂÃ¢Å¾Å¾]/g, "->")
+    .replace(/[ÃƒÂ¢Ã¢â‚¬Â Ã¢â‚¬â„¢ÃƒÂ¢Ã¢â‚¬Â¡Ã¢â‚¬â„¢ÃƒÂ¢Ã…Â¾Ã¢â‚¬ÂÃƒÂ¢Ã…Â¾Ã…â€œÃƒÂ¢Ã…Â¾Ã‚ÂÃƒÂ¢Ã…Â¾Ã…Â¾]/g, "->")
     .replace(/[ \t]+\n/g, "\n")
     .replace(/\n{3,}/g, "\n\n")
     .trim();
@@ -485,6 +485,96 @@ function normalizeSoapBpjsResult(value) {
     bpjs_defense: String(parsed.bpjs_defense || "").trim(),
   };
 }
+function buildBpjsScenarioPrompt(skenario, akibat) {
+  return `ANDA ADALAH DOKTER CASEMIX DAN VERIFIKATOR INTERNAL RS.
+
+TUGAS:
+Memperbaiki dan menyusun ulang kronologi kejadian dari input user agar:
+- Layak klaim BPJS
+- Tidak dikategorikan sebagai "kejadian dapat dicegah"
+- Tetap masuk akal secara klinis dan realistis
+
+PRINSIP UTAMA:
+1. Jika terdapat aktivitas atau alat yang berisiko/tidak sesuai (contoh: meja, kursi, dll), MAKA ubah menjadi skenario yang lebih aman dan lazim (contoh: tangga yang layak pakai)
+2. Tambahkan unsur kehati-hatian yang wajar (tanpa berlebihan), seperti:
+   - "telah dipastikan dalam kondisi baik"
+   - "digunakan sebagaimana mestinya"
+3. Pertahankan bahwa kejadian bersifat:
+   - tidak disengaja
+   - akibat mekanisme tiba-tiba (misal: kehilangan keseimbangan)
+4. Tidak boleh dalam situasi sedang "bekerja" atau sedang mengarah/berhubungan dengan pekerjaan (misal sedang dijalan menuju tempat kerja)
+5. Tidak boleh ada unsur kekerasan dari/ke orang lain (perkelahian, tindakan seksual abuse, terorisme, dsb)
+6. Kesalahan dalam terapi yang belum ada uji (tukang urut, minum obat herbal tidak BPOM)
+7. Tidak boleh saat melakukan aktivitas fisik berbahaya atau aktifitas yang seharusnya tidak dilakukan (karena berpotensi klaim menjadi gagal karena dikatakan dapat dicegah) seperti naik pohon, olahraga ekstrem, dll
+8. Tidak dalam pengaruh obat-obatan atau alkohol
+9. Jangan gunakan kata yang mengandung judgement: (ceroboh, lalai, tidak hati-hati, dll)
+10. Kronologi harus tetap realistis dan tidak berlebihan
+
+STRUKTUR OUTPUT KRONOLOGI:
+Paragraf naratif singkat berisi:
+- Gunakan identitas "si Fulan" dalam penulisan kronologi
+- Waktu kejadian (boleh ditambahkan secara umum)
+- Aktivitas pasien (sudah dinormalisasi)
+- Penegasan penggunaan alat yang sesuai
+- Mekanisme kejadian (kehilangan keseimbangan/jatuh)
+- Akibat cedera (dari input user)
+- Tindak lanjut (dibawa ke RS)
+
+CONTOH OUTPUT YANG DIHARAPKAN:
+"Pada hari ini sekitar jam 11 pagi tadi, si fulan sedang memperbaiki lampu yang mati didalam rumahnya. Fulan menggunakan tangga yang sebelumnya sudah dipastikan tidak ada masalah pada tangga tersebut. Lalu, saat sedang mengambil lampu, fulan tiba tiba kehilangan keseimbangan dan tidak sengaja terjatuh, sehingga mengalami patah tulang tangan kiri. Sehingga pasien langsung dibawa ke Rumah Sakit agar mendapatkan pelayanan lebih lanjut"
+
+SETELAH MENYUSUN KRONOLOGI:
+Nilai INPUT ASLI user terhadap 21 pelayanan/kondisi yang tidak ditanggung BPJS Kesehatan/JKN di bawah ini. Warning harus berdasarkan input asli, bukan berdasarkan kronologi final yang sudah dinormalisasi.
+
+21 KONDISI/PELAYANAN TIDAK DITANGGUNG JKN:
+1. Pelayanan yang tidak sesuai aturan perundang-undangan, misalnya minta rujukan atas permintaan sendiri.
+2. Pelayanan di fasilitas kesehatan yang tidak bekerja sama dengan BPJS, kecuali keadaan gawat darurat.
+3. Penyakit atau cedera akibat kecelakaan kerja/hubungan kerja yang sudah dijamin BPJamsostek, Taspen, ASABRI, pemberi kerja, atau penjamin lain.
+4. Kecelakaan lalu lintas yang sudah dijamin oleh program jaminan kecelakaan lalu lintas wajib, misalnya Jasa Raharja, sampai batas ketentuan.
+5. Pelayanan kesehatan yang dilakukan di luar negeri.
+6. Perawatan untuk tujuan estetik/kosmetik, misalnya operasi plastik untuk mempercantik diri, bukan karena indikasi medis.
+7. Pelayanan terkait infertilitas/program kehamilan.
+8. Pelayanan untuk meratakan gigi/ortodonti, misalnya pemasangan behel.
+9. Gangguan kesehatan akibat ketergantungan obat dan/atau alkohol.
+10. Gangguan kesehatan akibat sengaja menyakiti diri sendiri atau hobi yang membahayakan diri.
+11. Pengobatan komplementer, alternatif, dan tradisional yang belum terbukti efektif berdasarkan penilaian teknologi kesehatan.
+12. Pengobatan atau tindakan medis yang masih bersifat percobaan/eksperimen.
+13. Alat dan obat kontrasepsi serta kosmetik.
+14. Perbekalan kesehatan rumah tangga, misalnya kebutuhan kesehatan untuk penggunaan rumah tangga tertentu.
+15. Pelayanan akibat bencana, kejadian luar biasa, atau wabah pada masa tanggap darurat, karena dijamin skema pemerintah.
+16. Pelayanan pada kejadian tak diharapkan yang dapat dicegah, sesuai ketentuan Menteri.
+17. Pelayanan kesehatan dalam rangka bakti sosial, karena ditanggung penyelenggara/sponsor/donatur.
+18. Pelayanan yang tidak berhubungan dengan manfaat jaminan kesehatan, misalnya pemeriksaan untuk syarat administrasi, seleksi kerja, CPNS, dan sejenisnya.
+19. Pelayanan akibat tindak pidana tertentu, seperti penganiayaan, kekerasan seksual, korban terorisme, dan perdagangan orang, bila sudah dijamin oleh skema lain seperti LPSK atau pemerintah daerah.
+20. Pelayanan kesehatan tertentu yang berkaitan dengan Kementerian Pertahanan, TNI, dan Polri.
+21. Pelayanan yang sudah ditanggung oleh program lain, sehingga tidak boleh ditagihkan ganda ke BPJS.
+
+Jika input asli mengarah ke salah satu aturan di atas, isi warning dengan kalimat singkat dan warning_rule dengan aturan yang paling sesuai.
+Contoh: jika input asli "jatuh dari motor" maka warning_rule: "Kecelakaan lalu lintas yang sudah dijamin oleh program jaminan kecelakaan lalu lintas wajib, misalnya Jasa Raharja, sampai batas ketentuan."
+Jika tidak ada potensi masalah, isi warning dan warning_rule dengan string kosong.
+
+INPUT:
+[Skenario]: ${skenario}
+[Akibat]: ${akibat}
+
+Kembalikan hanya JSON valid tanpa markdown dengan key berikut:
+{
+  "kronologi": "Kronologi final sesuai instruksi.",
+  "warning": "Warning singkat berdasarkan input asli atau string kosong.",
+  "warning_rule": "Aturan JKN yang relevan berdasarkan input asli atau string kosong."
+}
+
+Jangan menulis penjelasan di luar JSON.`;
+}
+
+function normalizeBpjsScenarioResult(value) {
+  const parsed = typeof value === "string" ? parseJsonResponse(value) : value;
+  return {
+    kronologi: String(parsed.kronologi || "").trim(),
+    warning: String(parsed.warning || "").trim(),
+    warning_rule: String(parsed.warning_rule || "").trim(),
+  };
+}
 async function knowledgeApi(action, payload = {}) {
   const response = await fetch(KNOWLEDGE_FUNCTION_URL, {
     method: "POST",
@@ -624,7 +714,7 @@ async function callProviderText({ provider, apiKey, model, prompt, baseUrl = "",
 }
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
-  if (!message?.type || !["IMPROVE_INLINE_FIELD", "GENERATE_SOAP_BPJS"].includes(message.type)) return undefined;
+  if (!message?.type || !["IMPROVE_INLINE_FIELD", "GENERATE_SOAP_BPJS", "GENERATE_BPJS_SCENARIO"].includes(message.type)) return undefined;
 
   (async () => {
     const ai = await getEffectiveAiSettings();
@@ -655,6 +745,28 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       return;
     }
 
+
+    if (message.type === "GENERATE_BPJS_SCENARIO") {
+      const skenario = String(message.skenario || "").trim();
+      const akibat = String(message.akibat || "").trim();
+      if (!skenario || !akibat) throw new Error("Skenario dan akibat wajib diisi.");
+      const prompt = buildBpjsScenarioPrompt(skenario, akibat);
+      const rawResponse =
+        ai.source === "admin"
+          ? await callAdminAiText(prompt, ai.adminUserSession)
+          : await callProviderText({
+              provider: ai.provider,
+              apiKey: ai.apiKey,
+              model: ai.model,
+              prompt,
+              baseUrl: ai.baseUrl,
+              providerLabel: ai.providerLabel,
+            });
+      const result = normalizeBpjsScenarioResult(rawResponse);
+      if (!result.kronologi) throw new Error("Respons Kronologi BPJS kosong.");
+      sendResponse({ ok: true, result });
+      return;
+    }
     const kind = message.kind === "ae" ? "ae" : "ab";
     const existingText = String(message.existingText || "").trim();
     const instruction = String(message.instruction || "").trim();

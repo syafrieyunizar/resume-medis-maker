@@ -686,6 +686,217 @@ P : RL 500cc, ranitidin, ondancetron 4mg</pre>
     });
     close.addEventListener("click", closePopover);
   }
+
+  function showBpjsScenarioHelp(anchor) {
+    const current = document.querySelector(".rmr-bpjs-help-popover");
+    if (current) {
+      current.rmrCleanup?.();
+      current.remove();
+      return;
+    }
+    const popover = document.createElement("div");
+    popover.className = "rmr-soap-help-popover rmr-bpjs-help-popover";
+    popover.innerHTML = `
+      <div class="rmr-soap-help-warning">\u26A0\uFE0F Semua keputusan klaim tetap mengikuti ketentuan JKN/BPJS dan verifikator.</div>
+      <div class="rmr-soap-help-grid">
+        <section class="rmr-soap-help-card">
+          <strong>Cara Pakai</strong>
+          <ol>
+            <li>Masukkan skenario kejadian secara singkat.</li>
+            <li>Masukkan akibat/cedera yang dialami pasien.</li>
+            <li>Tekan tombol Buat Skenario BPJS.</li>
+            <li>AI akan menyusun kronologi final dan menampilkan warning berdasarkan input asli bila mengarah ke kondisi tidak ditanggung JKN.</li>
+          </ol>
+        </section>
+        <section class="rmr-soap-help-card">
+          <strong>Contoh input</strong>
+          <pre>Skenario:
+Pasien naik meja memperbaiki lampu lalu jatuh.
+
+Akibat:
+Patah tangan kiri.</pre>
+        </section>
+        <section class="rmr-soap-help-card rmr-soap-help-card-wide">
+          <strong>21 Kondisi/Pelayanan Tidak Ditanggung JKN</strong>
+          <ol>
+            <li>Pelayanan yang tidak sesuai aturan perundang-undangan, misalnya minta rujukan atas permintaan sendiri.</li>
+            <li>Pelayanan di fasilitas kesehatan yang tidak bekerja sama dengan BPJS, kecuali keadaan gawat darurat.</li>
+            <li>Penyakit atau cedera akibat kecelakaan kerja/hubungan kerja yang sudah dijamin BPJamsostek, Taspen, ASABRI, pemberi kerja, atau penjamin lain.</li>
+            <li>Kecelakaan lalu lintas yang sudah dijamin oleh program jaminan kecelakaan lalu lintas wajib, misalnya Jasa Raharja, sampai batas ketentuan.</li>
+            <li>Pelayanan kesehatan yang dilakukan di luar negeri.</li>
+            <li>Perawatan untuk tujuan estetik/kosmetik, misalnya operasi plastik untuk mempercantik diri, bukan karena indikasi medis.</li>
+            <li>Pelayanan terkait infertilitas/program kehamilan.</li>
+            <li>Pelayanan untuk meratakan gigi/ortodonti, misalnya pemasangan behel.</li>
+            <li>Gangguan kesehatan akibat ketergantungan obat dan/atau alkohol.</li>
+            <li>Gangguan kesehatan akibat sengaja menyakiti diri sendiri atau hobi yang membahayakan diri.</li>
+            <li>Pengobatan komplementer, alternatif, dan tradisional yang belum terbukti efektif berdasarkan penilaian teknologi kesehatan.</li>
+            <li>Pengobatan atau tindakan medis yang masih bersifat percobaan/eksperimen.</li>
+            <li>Alat dan obat kontrasepsi serta kosmetik.</li>
+            <li>Perbekalan kesehatan rumah tangga, misalnya kebutuhan kesehatan untuk penggunaan rumah tangga tertentu.</li>
+            <li>Pelayanan akibat bencana, kejadian luar biasa, atau wabah pada masa tanggap darurat, karena dijamin skema pemerintah.</li>
+            <li>Pelayanan pada kejadian tak diharapkan yang dapat dicegah, sesuai ketentuan Menteri.</li>
+            <li>Pelayanan kesehatan dalam rangka bakti sosial, karena ditanggung penyelenggara/sponsor/donatur.</li>
+            <li>Pelayanan yang tidak berhubungan dengan manfaat jaminan kesehatan, misalnya pemeriksaan untuk syarat administrasi, seleksi kerja, CPNS, dan sejenisnya.</li>
+            <li>Pelayanan akibat tindak pidana tertentu, seperti penganiayaan, kekerasan seksual, korban terorisme, dan perdagangan orang, bila sudah dijamin oleh skema lain seperti LPSK atau pemerintah daerah.</li>
+            <li>Pelayanan kesehatan tertentu yang berkaitan dengan Kementerian Pertahanan, TNI, dan Polri.</li>
+            <li>Pelayanan yang sudah ditanggung oleh program lain, sehingga tidak boleh ditagihkan ganda ke BPJS.</li>
+          </ol>
+        </section>
+      </div>`;
+    const close = createButton("Tutup", "rmr-inline-btn-secondary");
+    popover.append(close);
+    document.body.append(popover);
+    const rect = anchor.getBoundingClientRect();
+    popover.style.left = `${Math.max(8, Math.min(rect.left, window.innerWidth - popover.offsetWidth - 8))}px`;
+    popover.style.top = `${Math.max(8, Math.min(rect.bottom + 6, window.innerHeight - popover.offsetHeight - 8))}px`;
+    const closePopover = () => {
+      document.removeEventListener("pointerdown", outsideClick);
+      popover.remove();
+    };
+    const outsideClick = (event) => {
+      if (!popover.contains(event.target) && event.target !== anchor) closePopover();
+    };
+    popover.rmrCleanup = () => document.removeEventListener("pointerdown", outsideClick);
+    setTimeout(() => document.addEventListener("pointerdown", outsideClick), 0);
+    const handle = popover.querySelector(".rmr-soap-help-warning");
+    handle.addEventListener("pointerdown", (event) => {
+      const startRect = popover.getBoundingClientRect();
+      const offsetX = event.clientX - startRect.left;
+      const offsetY = event.clientY - startRect.top;
+      handle.setPointerCapture(event.pointerId);
+      const move = (moveEvent) => {
+        popover.style.left = `${Math.max(0, Math.min(moveEvent.clientX - offsetX, window.innerWidth - popover.offsetWidth))}px`;
+        popover.style.top = `${Math.max(0, Math.min(moveEvent.clientY - offsetY, window.innerHeight - popover.offsetHeight))}px`;
+      };
+      const stop = () => handle.removeEventListener("pointermove", move);
+      handle.addEventListener("pointermove", move);
+      handle.addEventListener("pointerup", stop, { once: true });
+      handle.addEventListener("pointercancel", stop, { once: true });
+    });
+    close.addEventListener("click", closePopover);
+  }
+
+  function getBpjsScenarioStorageKey() {
+    return `rmrBpjsScenario:${location.origin}${location.pathname}${location.search}`;
+  }
+
+  function saveBpjsScenarioResult(result) {
+    return chrome.storage.local.set({ [getBpjsScenarioStorageKey()]: result });
+  }
+
+  function loadBpjsScenarioResult() {
+    return new Promise((resolve) => {
+      chrome.storage.local.get(getBpjsScenarioStorageKey(), (data) => resolve(data[getBpjsScenarioStorageKey()] || null));
+    });
+  }
+
+  function showBpjsScenarioResultModal(result) {
+    document.querySelector(".rmr-bpjs-result-backdrop")?.remove();
+    const backdrop = document.createElement("div");
+    backdrop.className = "rmr-soap-result-backdrop rmr-bpjs-result-backdrop";
+    const modal = document.createElement("div");
+    modal.className = "rmr-soap-result-modal";
+    modal.innerHTML = `
+      <div class="rmr-soap-result-header"><strong>Kronologi Final</strong></div>
+      <pre class="rmr-soap-result-body"></pre>`;
+    modal.querySelector("pre").textContent = result.kronologi || "";
+    if (result.warning || result.warning_rule) {
+      const warning = document.createElement("div");
+      warning.className = "rmr-bpjs-warning-card";
+      const warningText = result.warning || "Potensi tidak dijamin JKN:";
+      warning.textContent = `\u26A0\uFE0F ${warningText.replace(/^\u26A0\uFE0F\s*/, "")}\n${result.warning_rule || ""}`.trim();
+      modal.append(warning);
+    }
+    const actions = document.createElement("div");
+    actions.className = "rmr-inline-actions";
+    const copy = createButton("Copy", "rmr-inline-btn-primary");
+    const close = createButton("Tutup", "rmr-inline-btn-secondary");
+    actions.append(copy, close);
+    modal.append(actions);
+    backdrop.append(modal);
+    document.body.append(backdrop);
+    copy.addEventListener("click", () => copySoapText(result.kronologi || ""));
+    close.addEventListener("click", () => backdrop.remove());
+    backdrop.addEventListener("click", (event) => {
+      if (event.target === backdrop) backdrop.remove();
+    });
+  }
+
+  function showBpjsScenarioModal() {
+    document.querySelector(".rmr-bpjs-modal-backdrop")?.remove();
+    const backdrop = document.createElement("div");
+    backdrop.className = "rmr-soap-result-backdrop rmr-bpjs-modal-backdrop";
+    const modal = document.createElement("div");
+    modal.className = "rmr-soap-result-modal rmr-bpjs-modal";
+    modal.innerHTML = `
+      <div class="rmr-soap-result-header"><strong>Kronologi BPJS</strong></div>
+      <label>Skenario Kejadian<textarea rows="5" data-rmr-bpjs-skenario placeholder="Ceritakan kejadiannya... (Contoh: Pasien naik meja memperbaiki lampu lalu jatuh)"></textarea></label>
+      <label>Akibat / Cedera<textarea rows="4" data-rmr-bpjs-akibat placeholder="Sebutkan akibat dari kejadian tersebut... (Contoh: patah tangan kiri)"></textarea></label>
+      <div class="rmr-inline-status" data-rmr-bpjs-status hidden></div>
+      <div class="rmr-inline-actions">
+        <button type="button" class="rmr-inline-btn rmr-inline-btn-primary" data-rmr-bpjs-generate>Buat Skenario BPJS</button>
+        <button type="button" class="rmr-inline-btn rmr-inline-btn-primary" data-rmr-bpjs-preview hidden>Preview hasil</button>
+        <button type="button" class="rmr-inline-btn rmr-inline-btn-secondary" data-rmr-bpjs-close>Tutup</button>
+      </div>`;
+    backdrop.append(modal);
+    document.body.append(backdrop);
+    const skenario = modal.querySelector("[data-rmr-bpjs-skenario]");
+    const akibat = modal.querySelector("[data-rmr-bpjs-akibat]");
+    const status = modal.querySelector("[data-rmr-bpjs-status]");
+    const generate = modal.querySelector("[data-rmr-bpjs-generate]");
+    const preview = modal.querySelector("[data-rmr-bpjs-preview]");
+    const showStatus = (message, kind) => {
+      status.hidden = false;
+      status.className = `rmr-inline-status ${kind ? `is-${kind}` : ""}`.trim();
+      status.textContent = message;
+    };
+    let timer = null;
+    const stopTimer = () => clearInterval(timer);
+    const startTimer = () => {
+      const started = Date.now();
+      const render = () => showStatus(`Menyusun Skenario Verifikasi BPJS... ${Math.floor((Date.now() - started) / 1000)} detik.`, "loading");
+      stopTimer();
+      render();
+      timer = setInterval(render, 1000);
+    };
+    loadBpjsScenarioResult().then((saved) => {
+      preview.hidden = !saved;
+    });
+    preview.addEventListener("click", async () => showBpjsScenarioResultModal(await loadBpjsScenarioResult()));
+    modal.querySelector("[data-rmr-bpjs-close]").addEventListener("click", () => {
+      stopTimer();
+      backdrop.remove();
+    });
+    backdrop.addEventListener("click", (event) => {
+      if (event.target === backdrop) {
+        stopTimer();
+        backdrop.remove();
+      }
+    });
+    generate.addEventListener("click", async () => {
+      const skenarioText = skenario.value.trim();
+      const akibatText = akibat.value.trim();
+      if (!skenarioText || !akibatText) {
+        showStatus("Skenario dan akibat wajib diisi.", "error");
+        return;
+      }
+      generate.disabled = true;
+      startTimer();
+      try {
+        const response = await chrome.runtime.sendMessage({ type: "GENERATE_BPJS_SCENARIO", skenario: skenarioText, akibat: akibatText });
+        if (!response?.ok) throw new Error(response?.error || "Gagal membuat skenario BPJS.");
+        await saveBpjsScenarioResult(response.result || {});
+        stopTimer();
+        backdrop.remove();
+        showBpjsScenarioResultModal(response.result || {});
+      } catch (error) {
+        stopTimer();
+        generate.disabled = false;
+        showStatus(error instanceof Error ? error.message : String(error), "error");
+      }
+    });
+    skenario.focus();
+  }
   function createSoapGeneratorUi() {
     const title = document.querySelector("#muncul1");
     if (!title || title.dataset.rmrSoapGeneratorReady === "1") return;
@@ -704,6 +915,19 @@ P : RL 500cc, ranitidin, ondancetron 4mg</pre>
     help.textContent = "?";
     help.setAttribute("aria-label", "Bantuan Magic SOAP");
     trigger.insertAdjacentElement("afterend", help);
+
+    const scenario = document.createElement("button");
+    scenario.type = "button";
+    scenario.className = "rmr-bpjs-trigger";
+    scenario.textContent = "Kronologi BPJS";
+    help.insertAdjacentElement("afterend", scenario);
+
+    const scenarioHelp = document.createElement("button");
+    scenarioHelp.type = "button";
+    scenarioHelp.className = "rmr-soap-help-trigger";
+    scenarioHelp.textContent = "?";
+    scenarioHelp.setAttribute("aria-label", "Bantuan Kronologi BPJS");
+    scenario.insertAdjacentElement("afterend", scenarioHelp);
 
     const panel = document.createElement("div");
     panel.className = "rmr-soap-gen-panel";
@@ -758,6 +982,8 @@ P : RL 500cc, ranitidin, ondancetron 4mg</pre>
       if (!panel.hidden) preview.hidden = !(await loadSoapResult());
     });
     help.addEventListener("click", () => showMagicSoapHelp(help));
+    scenario.addEventListener("click", showBpjsScenarioModal);
+    scenarioHelp.addEventListener("click", () => showBpjsScenarioHelp(scenarioHelp));
     panel.querySelector("[data-rmr-soap-close]").addEventListener("click", () => {
       stopLoadingTimer();
       panel.hidden = true;
