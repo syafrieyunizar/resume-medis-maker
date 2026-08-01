@@ -1051,8 +1051,54 @@ Patah tangan kiri.</pre>
       }
     });
   }
+  function createDischargeMedicationUi() {
+    const textarea = document.querySelector('textarea[name="e"]');
+    if (!textarea || textarea.dataset.rmrEresepReady === "1") return;
+    textarea.dataset.rmrEresepReady = "1";
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "rmr-discharge-medication-trigger";
+    button.textContent = "Ambil dari E-Resep";
+    const labelCell = [...(textarea.closest("tr")?.children || [])].find((cell) =>
+      /^terapi saat pulang\s*:?$/i.test(String(cell.textContent || "").replace(/\s+/g, " ").trim())
+    );
+    labelCell ? labelCell.appendChild(button) : textarea.insertAdjacentElement("afterend", button);
+    button.addEventListener("click", async () => {
+      button.disabled = true;
+      button.textContent = "Membaca & merapikan...";
+      try {
+        const response = await chrome.runtime.sendMessage({
+          type: "FETCH_DISCHARGE_MEDICATIONS",
+          sourceUrl: location.href,
+        });
+        if (!response?.ok) throw new Error(response?.error || "E-Resep tidak dapat dibaca.");
+        const medications = response.result?.medications || [];
+        const existing = String(textarea.value || "").trim() === "-"
+          ? []
+          : String(textarea.value || "").split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+        const seen = new Set(existing.map((line) => line.toLowerCase()));
+        let added = 0;
+        medications.forEach((medication) => {
+          if (seen.has(medication.toLowerCase())) return;
+          existing.push(medication);
+          seen.add(medication.toLowerCase());
+          added += 1;
+        });
+        setValue(textarea, existing.join("\n"));
+        showSoapToast(added
+          ? `${added} obat E-Resep tanggal ${response.result?.date || "terakhir"} berhasil dimasukkan.`
+          : "Semua obat E-Resep sudah ada di Terapi Saat Pulang.");
+      } catch (error) {
+        showSoapToast(error instanceof Error ? error.message : String(error));
+      } finally {
+        button.disabled = false;
+        button.textContent = "Ambil dari E-Resep";
+      }
+    });
+  }
   function boot() {
     createSoapGeneratorUi();
+    createDischargeMedicationUi();
     // Inline improve ab/ae dinonaktifkan; workflow sekarang lewat Magic SOAP.
     return;
   }

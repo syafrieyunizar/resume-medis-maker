@@ -714,10 +714,223 @@ async function callProviderText({ provider, apiKey, model, prompt, baseUrl = "",
   return data?.choices?.[0]?.message?.content || "";
 }
 
+function buildDischargeMedicationPrompt(data) {
+  const candidates = data.prescriptions.map((prescription, index) => ({
+    candidate: index + 1,
+    date: prescription.date,
+    oral_count: prescription.oralCount,
+    parenteral_or_device_count: prescription.parenteralCount,
+    medications: prescription.medications,
+  }));
+  return `ANDA ADALAH ASISTEN DOKTER YANG MERAPIKAN TERAPI SAAT PULANG DARI E-RESEP.
+
+TUGAS:
+1. Bandingkan setiap kandidat resep pada tanggal perawatan terakhir dan satu hari sebelumnya (H-1).
+2. Pilih SATU kandidat yang paling mungkin merupakan resep pulang, yaitu yang paling dominan berisi obat oral.
+3. Tolak kandidat yang dominan berisi injeksi, infus, ampul, vial, nebulisasi, alat kesehatan, atau bahan habis pakai. Kandidat seperti itu adalah terapi selama dirawat, bukan obat pulang.
+4. Dari kandidat terpilih, keluarkan hanya obat yang layak dibawa pulang. Jangan masukkan injeksi, infus, ampul, vial, nebulisasi, alat kesehatan, atau bahan habis pakai.
+5. Jangan menambah obat, dosis, frekuensi, rute, atau aturan pakai yang tidak ada pada data sumber.
+
+ATURAN PENULISAN:
+- Satu obat satu baris.
+- Hapus kode stok/produk dalam kurung seperti (PPG) atau (EPM).
+- Rapikan spasi dan satuan.
+- Gabungkan nama obat, frekuensi, dan kekuatan secara natural.
+- Contoh: "Asam Mefenamat 500 mg Tablet" dengan aturan "3x1" menjadi "Asam Mefenamat 3x500mg".
+- Contoh: "Cefadroxil 500 mg Kapsul" dengan aturan "2x1" menjadi "Cefadroxil 2x500mg".
+- Untuk aturan yang kompleks, pertahankan apa adanya dan jangan menghitung atau menebak dosis.
+
+DATA KANDIDAT E-RESEP:
+${JSON.stringify(candidates)}
+
+Kembalikan hanya JSON valid tanpa markdown:
+{
+  "source_date": "YYYY-MM-DD",
+  "medications": ["Obat pertama", "Obat kedua"]
+}
+
+Jangan menulis penjelasan di luar JSON.`;
+}
+
+function normalizeDischargeMedicationResult(value, prescriptions = []) {
+  const parsed = typeof value === "string" ? parseJsonResponse(value) : value;
+  const allowedDates = new Set(prescriptions.map((item) => item.date));
+  const sourceDate = String(parsed.source_date || "").trim();
+  const medications = [...new Set(
+    (Array.isArray(parsed.medications) ? parsed.medications : [])
+      .map((item) => String(item || "").replace(/\s+/g, " ").trim())
+      .filter((item) => item && !/\b(?:injeksi|injection|infus|ampul|ampoule|vial|spuit|syringe|underpad|elektroda|kateter|catheter)\b/i.test(item))
+  )];
+  return {
+    date: allowedDates.has(sourceDate) ? sourceDate : prescriptions[0]?.date || "",
+    medications,
+  };
+}
+function waitForTabComplete(tabId, timeout = 20000) {
+  return new Promise((resolve, reject) => {
+    const done = (error) => {
+      clearTimeout(timer);
+      chrome.tabs.onUpdated.removeListener(listener);
+      error ? reject(error) : resolve();
+    };
+    const listener = (updatedTabId, changeInfo) => {
+      if (updatedTabId === tabId && changeInfo.status === "complete") done();
+    };
+    const timer = setTimeout(() => done(new Error("Halaman E-Resep terlalu lama dimuat.")), timeout);
+    chrome.tabs.onUpdated.addListener(listener);
+    chrome.tabs.get(tabId).then((tab) => tab.status === "complete" && done()).catch(done);
+  });
+}
+
+async function navigateInactiveTab(tabId, url) {
+  await chrome.tabs.update(tabId, { url, active: false });
+  await waitForTabComplete(tabId);
+  await new Promise((resolve) => setTimeout(resolve, 500));
+}
+
+async function runInTab(tabId, func) {
+  const [{ result } = {}] = await chrome.scripting.executeScript({ target: { tabId }, func });
+  return result;
+}
+
+async function fetchDischargeMedications(sourceUrl) {
+  const source = new URL(sourceUrl);
+  if (!["http:", "https:"].includes(source.protocol) || !/\/(?:erms\/)?rsud\//i.test(source.pathname)) {
+    throw new Error("URL halaman resume tidak valid.");
+  }
+  const allowedUrl = (value, pathPattern) => {
+    const url = new URL(value);
+    if (url.origin !== source.origin || !pathPattern.test(url.pathname)) throw new Error("Navigasi E-Resep tidak valid.");
+    return url.href;
+  };
+  let tabId = null;
+  try {
+    const tab = await chrome.tabs.create({ url: source.href, active: false });
+    tabId = tab.id;
+    if (!tabId) throw new Error("Tab E-Resep tidak dapat dibuat.");
+    await waitForTabComplete(tabId);
+
+    let navigation = await runInTab(tabId, () => {
+      const links = [...document.querySelectorAll("a[href]")];
+      const text = (element) => String(element.textContent || "").replace(/\s+/g, " ").trim().toLowerCase();
+      return {
+        eResepUrl: links.find((link) => /\/Ereseptwornp\//i.test(link.href) || text(link) === "e-resep")?.href || "",
+        tindakLanjutUrl: links.find((link) => /\/tindaklanjut(?:$|[/?#])/i.test(link.href) || text(link) === "tindak lanjut")?.href || "",
+      };
+    });
+
+    if (!navigation?.eResepUrl && !navigation?.tindakLanjutUrl && /\/pemeriksaanranap\//i.test(source.pathname)) {
+      const fallback = new URL(source.href);
+      fallback.pathname = fallback.pathname.replace(/\/[^/]+\/?$/, "/tindaklanjut");
+      navigation.tindakLanjutUrl = fallback.href;
+    }
+    if (!navigation?.eResepUrl && navigation?.tindakLanjutUrl) {
+      await navigateInactiveTab(tabId, allowedUrl(navigation.tindakLanjutUrl, /\/tindaklanjut\/?$/i));
+      navigation = await runInTab(tabId, () => {
+        const link = [...document.querySelectorAll("a[href]")].find((item) =>
+          /\/Ereseptwornp\//i.test(item.href) || String(item.textContent || "").replace(/\s+/g, " ").trim().toLowerCase() === "e-resep"
+        );
+        return { eResepUrl: link?.href || "" };
+      });
+    }
+    if (!navigation?.eResepUrl) throw new Error("Tombol E-Resep tidak ditemukan.");
+
+    await navigateInactiveTab(tabId, allowedUrl(navigation.eResepUrl, /\/Ereseptwornp\//i));
+    const history = await runInTab(tabId, () => {
+      const rows = [...document.querySelectorAll("tr")]
+        .map((row) => {
+          const date = String(row.textContent || "").match(/\b\d{4}-\d{2}-\d{2}\b/)?.[0] || "";
+          const link = [...row.querySelectorAll("a[href]")].find((item) =>
+            /riwayatv3open/i.test(item.href) && /lihat/i.test(item.textContent || "")
+          );
+          return { date, url: link?.href || "" };
+        })
+        .filter((item) => item.date && item.url);
+      const latestDate = rows.map((item) => item.date).sort().at(-1) || "";
+      const previous = new Date(`${latestDate}T00:00:00Z`);
+      previous.setUTCDate(previous.getUTCDate() - 1);
+      const previousDate = Number.isNaN(previous.getTime()) ? "" : previous.toISOString().slice(0, 10);
+      const seen = new Set();
+      return rows.filter((item) => {
+        if (![latestDate, previousDate].includes(item.date) || seen.has(item.url)) return false;
+        seen.add(item.url);
+        return true;
+      });
+    });
+    if (!history?.length) throw new Error("Riwayat resep tanggal terakhir dan H-1 tidak ditemukan.");
+
+    const prescriptions = [];
+    for (const item of history) {
+      await navigateInactiveTab(tabId, allowedUrl(item.url, /\/Ereseptwornp\/.*\/riwayatv3open\//i));
+      const rows = await runInTab(tabId, () => {
+        const values = [];
+        document.querySelectorAll("table").forEach((table) => {
+          const tableRows = [...table.rows].filter((row) => row.closest("table") === table);
+          const headerRow = tableRows.find((row) => {
+            const cells = [...row.cells].map((cell) =>
+              String(cell.textContent || "").replace(/\s+/g, " ").trim().toLowerCase()
+            );
+            return cells.includes("nama obat") && cells.includes("aturan pakai");
+          });
+          if (!headerRow) return;
+          const headers = [...headerRow.cells].map((cell) =>
+            String(cell.textContent || "").replace(/\s+/g, " ").trim().toLowerCase()
+          );
+          const nameIndex = headers.indexOf("nama obat");
+          const instructionIndex = headers.indexOf("aturan pakai");
+          const quantityIndex = headers.indexOf("jumlah");
+          tableRows.slice(tableRows.indexOf(headerRow) + 1).forEach((row) => {
+            const cells = [...row.cells];
+            const name = String(cells[nameIndex]?.textContent || "").replace(/\s+/g, " ").trim();
+            const instruction = String(cells[instructionIndex]?.textContent || "").replace(/\s+/g, " ").trim();
+            const quantity = String(cells[quantityIndex]?.textContent || "").replace(/\s+/g, " ").trim();
+            if (name) values.push({ name, instruction, quantity });
+          });
+        });
+        return values;
+      });
+      if (!rows?.length) continue;
+      const oralPattern = /\b(?:tablet|kapsul|kaplet|sirup|syrup|suspensi|sachet|puyer|pulveres|oral)\b/i;
+      const parenteralPattern = /\b(?:injeksi|injection|infus|ampul|ampoule|vial|spuit|syringe|underpad|elektroda|kateter|catheter)\b/i;
+      prescriptions.push({
+        date: item.date,
+        medications: rows,
+        oralCount: rows.filter((row) => oralPattern.test(row.name)).length,
+        parenteralCount: rows.filter((row) => parenteralPattern.test(row.name)).length,
+      });
+    }
+
+    if (!prescriptions.length) throw new Error("Tabel obat tanggal terakhir dan H-1 tidak terbaca.");
+    return { prescriptions };
+  } finally {
+    if (tabId) await chrome.tabs.remove(tabId).catch(() => {});
+  }
+}
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
-  if (!message?.type || !["IMPROVE_INLINE_FIELD", "GENERATE_SOAP_BPJS", "GENERATE_BPJS_SCENARIO"].includes(message.type)) return undefined;
+  if (!message?.type || !["IMPROVE_INLINE_FIELD", "GENERATE_SOAP_BPJS", "GENERATE_BPJS_SCENARIO", "FETCH_DISCHARGE_MEDICATIONS"].includes(message.type)) return undefined;
 
   (async () => {
+    if (message.type === "FETCH_DISCHARGE_MEDICATIONS") {
+      const sourceUrl = String(message.sourceUrl || "");
+      const data = await fetchDischargeMedications(sourceUrl);
+      const ai = await getEffectiveAiSettings();
+      const prompt = buildDischargeMedicationPrompt(data);
+      const rawResponse =
+        ai.source === "admin"
+          ? await callAdminAiText(prompt, ai.adminUserSession, "terapi_pulang_eresep")
+          : await callProviderText({
+              provider: ai.provider,
+              apiKey: ai.apiKey,
+              model: ai.model,
+              prompt,
+              baseUrl: ai.baseUrl,
+              providerLabel: ai.providerLabel,
+            });
+      const result = normalizeDischargeMedicationResult(rawResponse, data.prescriptions);
+      if (!result.medications.length) throw new Error("AI tidak menemukan resep pulang yang dominan obat oral.");
+      sendResponse({ ok: true, result });
+      return;
+    }
     const ai = await getEffectiveAiSettings();
 
     if (message.type === "GENERATE_SOAP_BPJS") {

@@ -448,6 +448,27 @@
   z-index: 2147483647;
 }
 
+.rmr-discharge-medication-trigger {
+  background: #111111;
+  border: 1px solid #111111;
+  border-radius: 4px;
+  color: #ffffff;
+  cursor: pointer;
+  display: block;
+  font: 700 11px/1.2 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  margin-top: 4px;
+  padding: 5px 8px;
+}
+
+.rmr-discharge-medication-trigger:hover:not(:disabled) {
+  background: #ffffff;
+  color: #111111;
+}
+
+.rmr-discharge-medication-trigger:disabled {
+  cursor: wait;
+  opacity: 0.55;
+}
 .rmr-soap-result-backdrop {
   align-items: center;
   background: rgba(0, 0, 0, 0.45);
