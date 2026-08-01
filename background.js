@@ -626,9 +626,10 @@ async function validateStoredAdminUserSession() {
   }
 }
 
-async function callAdminAiText(prompt, userSession) {
+async function callAdminAiText(prompt, userSession, feature = "ai_generate") {
   const data = await knowledgeApi("ai_generate", {
     prompt,
+    feature,
     user_session: userSession,
   });
   return data.text || "";
@@ -730,7 +731,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       const prompt = buildSoapBpjsPrompt(identity, message.serviceMode || "rawat_inap", soapInput);
       const rawResponse =
         ai.source === "admin"
-          ? await callAdminAiText(prompt, ai.adminUserSession)
+          ? await callAdminAiText(prompt, ai.adminUserSession, "magic_soap")
           : await callProviderText({
               provider: ai.provider,
               apiKey: ai.apiKey,
@@ -753,7 +754,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       const prompt = buildBpjsScenarioPrompt(skenario, akibat);
       const rawResponse =
         ai.source === "admin"
-          ? await callAdminAiText(prompt, ai.adminUserSession)
+          ? await callAdminAiText(prompt, ai.adminUserSession, "kronologi_bpjs")
           : await callProviderText({
               provider: ai.provider,
               apiKey: ai.apiKey,
@@ -782,7 +783,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       const prompt = buildImproveQuestionsPrompt(kind, existingText, instruction, anamnesisText);
       const rawResponse =
         ai.source === "admin"
-          ? await callAdminAiText(prompt, ai.adminUserSession)
+          ? await callAdminAiText(prompt, ai.adminUserSession, `inline_${kind}_questions`)
           : await callProviderText({
               provider: ai.provider,
               apiKey: ai.apiKey,
@@ -802,7 +803,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     const prompt = buildImprovePrompt(kind, existingText, instruction, confirmation, anamnesisText);
     const text =
       ai.source === "admin"
-        ? await callAdminAiText(prompt, ai.adminUserSession)
+        ? await callAdminAiText(prompt, ai.adminUserSession, `inline_${kind}`)
         : await callProviderText({
             provider: ai.provider,
             apiKey: ai.apiKey,

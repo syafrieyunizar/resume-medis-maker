@@ -1752,6 +1752,7 @@ async function callAdminAiText({
   responseJson = false,
   responseSchema = null,
   userSession = null,
+  feature = "ai_generate",
 }) {
   const data = await knowledgeApi("ai_generate", {
     systemPrompt,
@@ -1759,6 +1760,7 @@ async function callAdminAiText({
     prompt,
     responseJson,
     responseSchema,
+    feature,
     user_session: userSession,
   });
   return data.text || "";
@@ -2554,7 +2556,7 @@ async function analyzeResumeWithKnowledge(progressCtl) {
   try {
     analysis =
       ai.source === "admin"
-        ? await callAdminAiText({ prompt, responseJson: true, userSession: ai.adminUserSession })
+        ? await callAdminAiText({ prompt, responseJson: true, userSession: ai.adminUserSession, feature: "analisa_bpjs" })
         : await callProviderText({
             provider: ai.provider,
             apiKey: ai.apiKey,
@@ -3963,7 +3965,7 @@ $("#generateCpptDiagnosis")?.addEventListener("click", async (event) => {
     const ai = await getEffectiveAiSettings();
     const prompt = formatCpptDiagnosisPrompt(context);
     const text = ai.source === "admin"
-      ? await callAdminAiText({ prompt, responseJson: true, responseSchema: cpptDiagnosisSchema, userSession: ai.adminUserSession })
+      ? await callAdminAiText({ prompt, responseJson: true, responseSchema: cpptDiagnosisSchema, userSession: ai.adminUserSession, feature: "diagnosis_cppt" })
       : await callProviderText({
           provider: ai.provider,
           apiKey: ai.apiKey,
@@ -4246,6 +4248,7 @@ const schema = {
         responseJson: true,
         responseSchema: schema,
         userSession: ai.adminUserSession,
+        feature: "rangkum_cppt",
       });
     } else if (ai.provider === "gemini") {
       const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(
@@ -4867,6 +4870,7 @@ summarizePenunjangBtn.addEventListener("click", async () => {
           "Rangkum pemeriksaan penunjang bermakna dari hasil ekstraksi PDF berikut. Data identitas pasien sudah dihilangkan; gunakan hanya data klinis bermakna:\n\n" +
           JSON.stringify(parsedDocs),
         userSession: ai.adminUserSession,
+        feature: "rangkum_penunjang",
       });
       progress.stop();
     } else if (ai.provider === "gemini") {

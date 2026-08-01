@@ -999,6 +999,15 @@ Patah tangan kiri.</pre>
     panel.addEventListener("click", async (event) => {
       const button = event.target.closest?.("[data-rmr-soap-mode]");
       if (!button) return;
+      if (button.dataset.rmrSoapMode === "dari_poli") {
+        const proceed = confirm(
+          "Warning: Jika tetap menuliskan pasien merupakan pasien dari poli dengan rencana tindakan/rawat inap, penjaminan pasien pada periode rawat jalan sebelumnya berisiko tidak dibayarkan.\n\nJika setuju, proses Dari poli akan dilanjutkan. Jika tidak setuju dan pasien masuk melalui IGD, klik Rawat inap saja."
+        );
+        if (!proceed) {
+          showStatus("Tidak dilanjutkan. Jika pasien masuk melalui IGD, disarankan klik Rawat inap saja.", "error");
+          return;
+        }
+      }
       const fields = getSoapFields();
       const patientIdentity = getAnonymousPatientIdentity();
       if (!patientIdentity) {

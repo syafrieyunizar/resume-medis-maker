@@ -149,6 +149,16 @@ function normalizeUsername(value: unknown) {
   return username;
 }
 
+function normalizeLogLabel(value: unknown, fallback = "") {
+  return String(value || fallback).trim().toLowerCase().replace(/[^a-z0-9._-]+/g, "_").slice(0, 64);
+}
+
+function safeAiError(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error);
+  return message.match(/^(Provider API \d+|Gemini API \d+|API key admin belum diset|Respons AI admin kosong)/)?.[0]
+    || "Gagal memanggil provider";
+}
+
 async function hashPassword(password: string, username: string) {
   const pepper = Deno.env.get("ADMIN_USER_PASSWORD_PEPPER") || "";
   const payload = new TextEncoder().encode(`${username}::${password}::${pepper}`);
@@ -192,6 +202,17 @@ async function supabaseRequest(path: string, init: RequestInit = {}) {
     throw new Error(text || `Supabase REST ${response.status}`);
   }
   return text ? JSON.parse(text) : null;
+}
+
+async function writeUsageLog(log: Record<string, unknown>) {
+  try {
+    await supabaseRequest("app_usage_logs", {
+      method: "POST",
+      body: JSON.stringify(log),
+    });
+  } catch (error) {
+    console.error("Gagal menyimpan usage log", error);
+  }
 }
 
 function sanitizeChunk(chunk: KnowledgeChunk) {
@@ -560,29 +581,68 @@ async function callOpenAiCompatible(config: AdminAiConfig, payload: Record<strin
 }
 
 async function callAdminAi(payload: Record<string, unknown>) {
-  await validateAdminAiUserSession(payload.user_session || {});
+  const session = await validateAdminAiUserSession(payload.user_session || {});
   const appId = getAppId(payload);
-  const config = await getAdminAiConfig(appId);
-  if (!config?.api_key) throw new Error("API key admin belum diset");
-  let text = "";
+  const startedAt = Date.now();
+  let config: AdminAiConfig | null = null;
+  let provider = "";
+  let model = "";
   try {
-    text = config.provider === "gemini"
-      ? await callGemini(config, payload)
-      : await callOpenAiCompatible(config, payload);
+    config = await getAdminAiConfig(appId);
+    if (!config?.api_key) throw new Error("API key admin belum diset");
+    provider = config.provider;
+    model = config.model;
+    let text = "";
+    try {
+      text = config.provider === "gemini"
+        ? await callGemini(config, payload)
+        : await callOpenAiCompatible(config, payload);
+    } catch (error) {
+      if (config.provider === "gemini" || !config.gemini_fallback_api_key) throw error;
+      provider = "gemini-fallback";
+      model = config.gemini_fallback_model || "gemini-2.0-flash";
+      text = await callGemini(
+        {
+          ...config,
+          provider: "gemini",
+          api_key: config.gemini_fallback_api_key,
+          model,
+        },
+        payload,
+      );
+    }
+    if (!String(text || "").trim()) throw new Error("Respons AI admin kosong");
+    await writeUsageLog({
+      app_id: appId,
+      username: session.username,
+      event_type: "api_call",
+      feature: normalizeLogLabel(payload.feature, "ai_generate"),
+      provider,
+      model,
+      success: true,
+      duration_ms: Date.now() - startedAt,
+      input_chars: String(payload.systemPrompt || "").length
+        + String(payload.userPrompt || payload.prompt || "").length,
+      output_chars: String(text).length,
+    });
+    return text;
   } catch (error) {
-    if (config.provider === "gemini" || !config.gemini_fallback_api_key) throw error;
-    text = await callGemini(
-      {
-        ...config,
-        provider: "gemini",
-        api_key: config.gemini_fallback_api_key,
-        model: config.gemini_fallback_model || "gemini-2.0-flash",
-      },
-      payload,
-    );
+    await writeUsageLog({
+      app_id: appId,
+      username: session.username,
+      event_type: "api_call",
+      feature: normalizeLogLabel(payload.feature, "ai_generate"),
+      provider: provider || config?.provider || null,
+      model: model || config?.model || null,
+      success: false,
+      error_message: safeAiError(error),
+      duration_ms: Date.now() - startedAt,
+      input_chars: String(payload.systemPrompt || "").length
+        + String(payload.userPrompt || payload.prompt || "").length,
+      output_chars: 0,
+    });
+    throw error;
   }
-  if (!String(text || "").trim()) throw new Error("Respons AI admin kosong");
-  return text;
 }
 
 Deno.serve(async (req) => {
@@ -628,7 +688,14 @@ Deno.serve(async (req) => {
     }
 
     if (action === "login_user") {
-      return json({ session: await loginAdminAiUser(payload) });
+      const session = await loginAdminAiUser(payload);
+      await writeUsageLog({
+        app_id: getAppId(payload),
+        username: session.username,
+        event_type: "login",
+        success: true,
+      });
+      return json({ session });
     }
 
     if (action === "validate_user_session") {
@@ -641,6 +708,18 @@ Deno.serve(async (req) => {
     }
 
     assertAdmin(payload);
+
+    if (action === "usage_logs") {
+      const appId = getAppId(payload);
+      const limit = Math.min(Math.max(Number(payload.limit) || 500, 1), 1000);
+      const days = Math.min(Math.max(Number(payload.days) || 30, 1), 365);
+      const since = new Date(Date.now() - days * 86400000).toISOString();
+      const data = await supabaseRequest(
+        `app_usage_logs?select=*&app_id=eq.${encodeURIComponent(appId)}&created_at=gte.${encodeURIComponent(since)}&order=created_at.desc&limit=${limit}`,
+        { method: "GET", headers: { Prefer: "" } },
+      );
+      return json({ logs: data || [] });
+    }
 
     if (action === "list_users") {
       const users = await listAdminAiUsers();

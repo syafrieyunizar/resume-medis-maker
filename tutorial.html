@@ -1,0 +1,377 @@
+<!doctype html>
+<html lang="id">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Tutorial Resume Medis Helper RSBHHB</title>
+  <style>
+    :root {
+      --canvas-white: #ffffff;
+      --graphite-black: #000000;
+      --ink-solid: #202020;
+      --slate-gray: #292d34;
+      --subtle-gray: #646464;
+      --ash-gray: #838383;
+      --whisper-white: #f0f0f0;
+      --cloud-gray: #e8e8e8;
+      --electric-violet: #7b68ee;
+      --success: #16a34a;
+      --error: #b91c1c;
+      --error-soft: #fee2e2;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html {
+      scroll-behavior: smooth;
+    }
+
+    body {
+      background: var(--canvas-white);
+      color: var(--ink-solid);
+      font-family: Inter, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      font-size: 14px;
+      letter-spacing: -0.14px;
+      line-height: 1.5;
+      margin: 0;
+    }
+
+    body.is-locked {
+      overflow: hidden;
+    }
+
+    a {
+      color: inherit;
+    }
+
+    .shell {
+      margin: 0 auto;
+      max-width: 1120px;
+      padding: 24px 18px 56px;
+    }
+
+    .topbar {
+      align-items: center;
+      border-bottom: 1px solid var(--cloud-gray);
+      display: flex;
+      gap: 14px;
+      justify-content: space-between;
+      padding-bottom: 18px;
+    }
+
+    .brand {
+      align-items: center;
+      display: flex;
+      gap: 12px;
+      min-width: 0;
+    }
+
+    .brand img {
+      height: 42px;
+      width: 42px;
+    }
+
+    h1,
+    h2,
+    h3 {
+      font-family: "Plus Jakarta Sans", Inter, system-ui, sans-serif;
+      letter-spacing: -0.04em;
+      margin: 0;
+    }
+
+    h1 {
+      font-size: clamp(26px, 4vw, 44px);
+      line-height: 1.05;
+    }
+
+    h2 {
+      font-size: 24px;
+      line-height: 1.15;
+    }
+
+    h3 {
+      font-size: 16px;
+    }
+
+    p {
+      margin: 0;
+    }
+
+    .muted {
+      color: var(--subtle-gray);
+    }
+
+    .label {
+      color: var(--slate-gray);
+      font-size: 12px;
+      font-weight: 600;
+      margin-bottom: 6px;
+      text-transform: uppercase;
+    }
+
+    .hero {
+      display: grid;
+      gap: 24px;
+      grid-template-columns: minmax(0, 1.2fr) minmax(280px, 0.8fr);
+      padding: 42px 0 30px;
+    }
+
+    .hero-copy {
+      display: flex;
+      flex-direction: column;
+      gap: 18px;
+    }
+
+    .summary {
+      color: var(--slate-gray);
+      font-size: 17px;
+      max-width: 760px;
+    }
+
+    .actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+    }
+
+    .btn {
+      align-items: center;
+      border-radius: 9px;
+      cursor: pointer;
+      display: inline-flex;
+      font-weight: 700;
+      justify-content: center;
+      min-height: 42px;
+      padding: 10px 14px;
+      text-decoration: none;
+      transition: background 0.18s ease, border-color 0.18s ease, color 0.18s ease;
+    }
+
+    .btn-primary {
+      background: var(--ink-solid);
+      border: 1px solid var(--ink-solid);
+      color: var(--canvas-white);
+    }
+
+    .btn-primary:hover {
+      background: var(--canvas-white);
+      color: var(--ink-solid);
+    }
+
+    .btn-outline {
+      background: transparent;
+      border: 1px solid var(--cloud-gray);
+      color: var(--ink-solid);
+    }
+
+    .btn-outline:hover {
+      border-color: var(--ink-solid);
+    }
+
+    .panel,
+    .video-card {
+      border: 1px solid var(--cloud-gray);
+      border-radius: 18px;
+      padding: 18px;
+    }
+
+    .panel {
+      background: var(--whisper-white);
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    .feature-list {
+      display: grid;
+      gap: 8px;
+      margin: 0;
+      padding: 0;
+    }
+
+    .feature-list li {
+      list-style: none;
+    }
+
+    .feature-list strong {
+      color: var(--ink-solid);
+    }
+
+    .section {
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+      padding-top: 26px;
+    }
+
+    .video-grid {
+      display: grid;
+      gap: 14px;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+
+    .video-card {
+      background: var(--canvas-white);
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      min-height: 168px;
+    }
+
+    .video-thumb,
+    .video-embed {
+      align-items: center;
+      aspect-ratio: 16 / 9;
+      background: var(--whisper-white);
+      border: 1px solid var(--cloud-gray);
+      border-radius: 9px;
+      color: var(--ash-gray);
+      display: flex;
+      font-weight: 700;
+      justify-content: center;
+    }
+
+
+    .disclaimer {
+      align-items: center;
+      background: rgba(0, 0, 0, 0.62);
+      display: flex;
+      inset: 0;
+      justify-content: center;
+      padding: 18px;
+      position: fixed;
+      z-index: 10;
+    }
+
+    .disclaimer[hidden] {
+      display: none;
+    }
+
+    .disclaimer-box {
+      background: var(--canvas-white);
+      border: 1px solid var(--cloud-gray);
+      border-radius: 18px;
+      box-shadow: 0 22px 64px rgba(0, 0, 0, 0.22);
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+      max-width: 660px;
+      padding: 22px;
+      width: min(100%, 660px);
+    }
+
+    .disclaimer-title {
+      color: var(--error);
+    }
+
+    @media (max-width: 860px) {
+      .hero,
+      .video-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .topbar {
+        align-items: flex-start;
+        flex-direction: column;
+      }
+    }
+  </style>
+</head>
+<body class="is-locked">
+  <div class="disclaimer" id="disclaimer" role="dialog" aria-modal="true" aria-labelledby="disclaimerTitle">
+    <div class="disclaimer-box">
+      <p class="label">Peringatan penggunaan</p>
+      <h2 id="disclaimerTitle" class="disclaimer-title">Tanggung Jawab Rekam Medis</h2>
+      <p>Pembuat extension tidak bertanggung jawab atas isi rekam medis yang dibuat, diubah, atau dimasukkan oleh pengguna.</p>
+      <p>Seluruh pengisian, koreksi, validasi, dan keputusan klinis dalam rekam medis tetap sepenuhnya menjadi tanggung jawab pengguna/dokter yang memakai extension ini.</p>
+      <p>AI hanya berfungsi sebagai alat bantu dokumentasi dan tidak menggantikan penilaian klinis.</p>
+      <button class="btn btn-primary" id="agreeButton" type="button">Saya Mengerti dan Setuju</button>
+    </div>
+  </div>
+
+  <main class="shell">
+    <header class="topbar">
+      <div class="brand">
+        <img src="logo-rsbhhb.png" alt="Logo RSBHHB">
+        <div>
+          <p class="label">Tutorial resmi</p>
+          <h3>Resume Medis Helper RSBHHB</h3>
+        </div>
+      </div>
+      <a class="btn btn-primary" href="https://s.id/resumehasanbasry" target="_blank" rel="noopener">Download Extension</a>
+    </header>
+
+    <section class="hero">
+      <div class="hero-copy">
+        <p class="label">Panduan penggunaan extension</p>
+        <h1>Belajar memakai Resume Medis Helper dengan aman dan terarah.</h1>
+        <p class="summary">Extension ini membantu proses dokumentasi SOAP, CPPT, penunjang, analisa klaim, Magic SOAP, dan Kronologi BPJS. Semua hasil tetap perlu dibaca ulang, diedit, dan divalidasi oleh dokter.</p>
+        <div class="actions">
+          <a class="btn btn-outline" href="#video-tutorial">Lihat Video Tutorial</a>
+        </div>
+      </div>
+
+      <aside class="panel" aria-label="Ringkasan fitur">
+        <p class="label">Fitur utama</p>
+        <ul class="feature-list">
+          <li><strong>Magic SOAP:</strong> mengembangkan S/O/A/P ringkas menjadi dokumentasi yang lebih rapi.</li>
+          <li><strong>Kronologi BPJS:</strong> membantu menyusun kronologi kejadian dan menampilkan warning input asli bila relevan.</li>
+          <li><strong>Penunjang:</strong> menarik dan merangkum hasil penunjang.</li>
+          <li><strong>CPPT:</strong> merangkum catatan perawatan menjadi field resume.</li>
+          <li><strong>Analisa:</strong> membantu melihat kelengkapan dokumentasi klaim.</li>
+        </ul>
+      </aside>
+    </section>
+
+
+    <section class="section" id="video-tutorial">
+      <div>
+        <p class="label">Video tutorial</p>
+        <h2>Daftar video tutorial</h2>
+      </div>
+      <div class="video-grid">
+        <article class="video-card">
+          <div class="video-embed">
+            <iframe src="https://www.youtube.com/embed/3K2MSnHIlrQ" title="Cara instalasi & Setting aplikasi hingga siap digunakan" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" allowfullscreen></iframe>
+          </div>
+          <h3>Cara instalasi & Setting aplikasi hingga siap digunakan</h3>
+          <p class="muted">Panduan instalasi dan setting aplikasi hingga siap digunakan.</p>
+          <a class="btn btn-outline" href="https://youtu.be/3K2MSnHIlrQ" target="_blank" rel="noopener">Tonton di YouTube</a>
+        </article>
+        <article class="video-card">
+          <div class="video-embed">
+            <iframe src="https://www.youtube.com/embed/h3UAOrUbbq4" title="Video Tutorial Dasar" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" allowfullscreen></iframe>
+          </div>
+          <h3>Video Tutorial Dasar</h3>
+          <p class="muted">Cara penggunaan untuk 1 pasien dari awal sampai selesai.</p>
+          <a class="btn btn-outline" href="https://youtu.be/h3UAOrUbbq4" target="_blank" rel="noopener">Tonton di YouTube</a>
+        </article>
+        <article class="video-card">
+          <div class="video-thumb">YouTube</div>
+          <h3>Cara penggunaan Fitur Magic SOAP</h3>
+          <p class="muted">Placeholder video tutorial yang akan diisi setelah link YouTube tersedia.</p>
+          <a class="btn btn-outline" href="#" target="_blank" rel="noopener">Link menyusul</a>
+        </article>
+        <article class="video-card">
+          <div class="video-thumb">YouTube</div>
+          <h3>Cara Penggunaan Fitur Kronologi</h3>
+          <p class="muted">Placeholder video tutorial yang akan diisi setelah link YouTube tersedia.</p>
+          <a class="btn btn-outline" href="#" target="_blank" rel="noopener">Link menyusul</a>
+        </article>
+      </div>
+    </section>
+
+  </main>
+
+  <script>
+    document.getElementById("agreeButton").addEventListener("click", function () {
+      document.getElementById("disclaimer").hidden = true;
+      document.body.classList.remove("is-locked");
+    });
+  </script>
+</body>
+</html>
+
+

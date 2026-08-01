@@ -55,6 +55,22 @@ create table if not exists public.admin_ai_users (
   updated_at timestamptz default now()
 );
 
+create table if not exists public.app_usage_logs (
+  id uuid primary key default gen_random_uuid(),
+  app_id text not null,
+  username text not null,
+  event_type text not null,
+  feature text,
+  provider text,
+  model text,
+  success boolean not null default true,
+  error_message text,
+  duration_ms integer,
+  input_chars integer,
+  output_chars integer,
+  created_at timestamptz default now()
+);
+
 alter table public.admin_ai_config
 add column if not exists app_id text;
 
@@ -147,6 +163,12 @@ create unique index if not exists admin_ai_providers_active_app_idx
 create unique index if not exists admin_ai_users_username_idx
   on public.admin_ai_users (username);
 
+create index if not exists app_usage_logs_app_created_idx
+  on public.app_usage_logs (app_id, created_at desc);
+
+create index if not exists app_usage_logs_user_created_idx
+  on public.app_usage_logs (username, created_at desc);
+
 create index if not exists knowledge_chunks_active_idx
   on public.knowledge_chunks (active);
 
@@ -160,6 +182,7 @@ alter table public.knowledge_chunks enable row level security;
 alter table public.admin_ai_config enable row level security;
 alter table public.admin_ai_providers enable row level security;
 alter table public.admin_ai_users enable row level security;
+alter table public.app_usage_logs enable row level security;
 
 drop policy if exists "Read active knowledge chunks" on public.knowledge_chunks;
 create policy "Read active knowledge chunks"
