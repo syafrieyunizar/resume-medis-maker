@@ -718,6 +718,7 @@ function buildDischargeMedicationPrompt(data) {
   const candidates = data.prescriptions.map((prescription, index) => ({
     candidate: index + 1,
     date: prescription.date,
+    doctor: prescription.doctor,
     oral_count: prescription.oralCount,
     parenteral_or_device_count: prescription.parenteralCount,
     medications: prescription.medications,
@@ -726,10 +727,13 @@ function buildDischargeMedicationPrompt(data) {
 
 TUGAS:
 1. Bandingkan setiap kandidat resep pada tanggal perawatan terakhir dan satu hari sebelumnya (H-1).
-2. Pilih SATU kandidat yang paling mungkin merupakan resep pulang, yaitu yang paling dominan berisi obat oral.
-3. Tolak kandidat yang dominan berisi injeksi, infus, ampul, vial, nebulisasi, alat kesehatan, atau bahan habis pakai. Kandidat seperti itu adalah terapi selama dirawat, bukan obat pulang.
-4. Dari kandidat terpilih, keluarkan hanya obat yang layak dibawa pulang. Jangan masukkan injeksi, infus, ampul, vial, nebulisasi, alat kesehatan, atau bahan habis pakai.
-5. Jangan menambah obat, dosis, frekuensi, rute, atau aturan pakai yang tidak ada pada data sumber.
+2. Nilai SETIAP kandidat secara terpisah dan pilih SEMUA kandidat yang paling mungkin merupakan resep pulang.
+3. Pasien dapat dirawat bersama oleh beberapa DPJP. Jangan membuang resep pulang hanya karena berasal dari dokter lain atau jumlah obat oralnya lebih sedikit daripada kandidat lain.
+4. Kandidat dengan satu atau sedikit obat tetap dapat dipilih bila obatnya oral dan kandidat tersebut tidak dominan berisi terapi parenteral.
+5. Tolak kandidat yang dominan berisi injeksi, infus, ampul, vial, nebulisasi, alat kesehatan, atau bahan habis pakai. Kandidat seperti itu adalah terapi selama dirawat, bukan obat pulang, walaupun di dalamnya terdapat beberapa obat oral.
+6. Gabungkan seluruh obat oral dari semua kandidat terpilih. Jangan masukkan injeksi, infus, obat topikal, alat kesehatan, atau bahan habis pakai.
+7. Hapus obat yang benar-benar duplikat. Bila nama obat sama tetapi aturan pakainya berbeda, pertahankan keduanya agar dokter dapat memeriksa.
+8. Jangan menambah obat, dosis, frekuensi, rute, atau aturan pakai yang tidak ada pada data sumber.
 
 ATURAN PENULISAN:
 - Satu obat satu baris.
@@ -745,7 +749,7 @@ ${JSON.stringify(candidates)}
 
 Kembalikan hanya JSON valid tanpa markdown:
 {
-  "source_date": "YYYY-MM-DD",
+  "selected_candidates": [1, 2],
   "medications": ["Obat pertama", "Obat kedua"]
 }
 
@@ -754,15 +758,25 @@ Jangan menulis penjelasan di luar JSON.`;
 
 function normalizeDischargeMedicationResult(value, prescriptions = []) {
   const parsed = typeof value === "string" ? parseJsonResponse(value) : value;
-  const allowedDates = new Set(prescriptions.map((item) => item.date));
-  const sourceDate = String(parsed.source_date || "").trim();
-  const medications = [...new Set(
-    (Array.isArray(parsed.medications) ? parsed.medications : [])
-      .map((item) => String(item || "").replace(/\s+/g, " ").trim())
-      .filter((item) => item && !/\b(?:injeksi|injection|infus|ampul|ampoule|vial|spuit|syringe|underpad|elektroda|kateter|catheter)\b/i.test(item))
+  const selectedCandidates = [...new Set(
+    (Array.isArray(parsed.selected_candidates) ? parsed.selected_candidates : [])
+      .map(Number)
+      .filter((item) => Number.isInteger(item) && item >= 1 && item <= prescriptions.length)
   )];
+  const selected = selectedCandidates.map((item) => prescriptions[item - 1]);
+  const seen = new Set();
+  const medications = (Array.isArray(parsed.medications) ? parsed.medications : [])
+    .map((item) => String(item || "").replace(/\s+/g, " ").trim())
+    .filter((item) => {
+      const key = item.toLowerCase();
+      if (!item || seen.has(key) || /\b(?:injeksi|injection|infus|ampul|ampoule|vial|spuit|syringe|underpad|elektroda|kateter|catheter)\b/i.test(item)) return false;
+      seen.add(key);
+      return true;
+    });
   return {
-    date: allowedDates.has(sourceDate) ? sourceDate : prescriptions[0]?.date || "",
+    date: [...new Set(selected.map((item) => item.date))].join(", "),
+    doctors: [...new Set(selected.map((item) => item.doctor).filter(Boolean))],
+    selectedCandidates,
     medications,
   };
 }
@@ -862,7 +876,7 @@ async function fetchDischargeMedications(sourceUrl) {
     const prescriptions = [];
     for (const item of history) {
       await navigateInactiveTab(tabId, allowedUrl(item.url, /\/Ereseptwornp\/.*\/riwayatv3open\//i));
-      const rows = await runInTab(tabId, () => {
+      const detail = await runInTab(tabId, () => {
         const values = [];
         document.querySelectorAll("table").forEach((table) => {
           const tableRows = [...table.rows].filter((row) => row.closest("table") === table);
@@ -887,13 +901,16 @@ async function fetchDischargeMedications(sourceUrl) {
             if (name) values.push({ name, instruction, quantity });
           });
         });
-        return values;
+        const doctor = String(document.body.innerText || "").match(/^\s*Nama Dokter\s*:\s*(.+)$/im)?.[1]?.trim() || "";
+        return { doctor, rows: values };
       });
+      const rows = detail?.rows;
       if (!rows?.length) continue;
       const oralPattern = /\b(?:tablet|kapsul|kaplet|sirup|syrup|suspensi|sachet|puyer|pulveres|oral)\b/i;
       const parenteralPattern = /\b(?:injeksi|injection|infus|ampul|ampoule|vial|spuit|syringe|underpad|elektroda|kateter|catheter)\b/i;
       prescriptions.push({
         date: item.date,
+        doctor: detail.doctor,
         medications: rows,
         oralCount: rows.filter((row) => oralPattern.test(row.name)).length,
         parenteralCount: rows.filter((row) => parenteralPattern.test(row.name)).length,
@@ -927,7 +944,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
               providerLabel: ai.providerLabel,
             });
       const result = normalizeDischargeMedicationResult(rawResponse, data.prescriptions);
-      if (!result.medications.length) throw new Error("AI tidak menemukan resep pulang yang dominan obat oral.");
+      if (!result.selectedCandidates.length || !result.medications.length) throw new Error("AI tidak menemukan resep pulang yang dominan obat oral.");
       sendResponse({ ok: true, result });
       return;
     }
